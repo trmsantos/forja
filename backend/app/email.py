@@ -7,6 +7,7 @@
 Nothing here can raise into a request — a failed send just returns False and logs.
 """
 
+import html
 import json
 import os
 import urllib.request
@@ -140,6 +141,10 @@ def reminder_html(
     step: int, studio: str, debtor_name: str, amount_display: str, days_overdue: int, pay_url: "str | None" = None
 ) -> str:
     """Escalating, polite-to-firm reminder sent to the debtor on behalf of the vendor."""
+    # Escape names/URL from Stripe and registration before they enter the HTML.
+    studio = html.escape(studio)
+    debtor_name = html.escape(debtor_name)
+    safe_url = html.escape(pay_url, quote=True) if pay_url else None
     if step <= 1:
         lead = (f"This is a friendly reminder that your invoice from {studio} "
                 f"(<strong>{amount_display}</strong>) is now {days_overdue} days past due.")
@@ -154,10 +159,10 @@ def reminder_html(
         close = "Please settle this invoice promptly to avoid further follow-up."
 
     button = (
-        f'<p style="margin:28px 0;"><a href="{pay_url}" '
+        f'<p style="margin:28px 0;"><a href="{safe_url}" '
         f'style="background:{_EMBER};color:#fff;text-decoration:none;padding:12px 22px;border-radius:4px;font-weight:600;">'
         f'Pay this invoice</a></p>'
-    ) if pay_url else ""
+    ) if safe_url else ""
 
     return _shell(
         f'<h1 style="font-size:22px;">Hi {debtor_name},</h1>'

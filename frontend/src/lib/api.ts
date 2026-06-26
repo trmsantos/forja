@@ -171,3 +171,18 @@ export async function billingPortal(): Promise<{ url: string }> {
   if (!res.ok) throw new Error(await detail(res, "Could not open billing"));
   return (await res.json()) as { url: string };
 }
+
+export type SweepResult = {
+  connections: number;
+  synced: number;
+  reminders: number;
+  skipped: number;
+  errors: number;
+  dry_run: boolean;
+};
+
+export async function runCollections(): Promise<SweepResult> {
+  const res = await fetch("/api/collections/run", { method: "POST", headers: { ...authHeaders() } });
+  if (!res.ok) throw new Error(await detail(res, "Could not run the chase"));
+  return (await res.json()) as SweepResult;
+}

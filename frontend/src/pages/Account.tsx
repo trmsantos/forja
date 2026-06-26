@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import { getDashboard, connectStripe, billingPortal, resendVerification, type Dashboard } from "../lib/api";
+import { getDashboard, connectStripe, billingPortal, runCollections, resendVerification, type Dashboard } from "../lib/api";
 
 function money(amount?: number | null, currency?: string | null): string {
   if (amount == null) return "—";
@@ -46,6 +46,8 @@ export function Account() {
   const [connecting, setConnecting] = useState(false);
   const [connectErr, setConnectErr] = useState<string | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
+  const [chasing, setChasing] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   function load() {
     getDashboard()
@@ -92,6 +94,25 @@ export function Account() {
       window.location.href = url;
     } catch {
       setPortalLoading(false);
+    }
+  }
+
+  function showToast(msg: string) {
+    setToast(msg);
+    window.setTimeout(() => setToast(null), 5000);
+  }
+
+  async function runChase() {
+    setChasing(true);
+    try {
+      const r = await runCollections();
+      const verb = r.dry_run ? "would be sent (dry run)" : "sent";
+      showToast(`${r.reminders} reminder${r.reminders === 1 ? "" : "s"} ${verb}, ${r.skipped} skipped`);
+      load(); // refresh stats + reminder counts
+    } catch {
+      showToast("Could not run the chase. Try again.");
+    } finally {
+      setChasing(false);
     }
   }
 
@@ -218,7 +239,12 @@ export function Account() {
             </div>
 
             <div className="mt-5 card p-7 shadow-soft">
-              <h2 className="font-display text-xl font-bold text-ink">Tracked invoices</h2>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="font-display text-xl font-bold text-ink">Tracked invoices</h2>
+                <button onClick={runChase} disabled={chasing} className="btn-ember !px-4 !py-2 text-[13px] disabled:opacity-60">
+                  {chasing ? "Chasing…" : "Run chase now"}
+                </button>
+              </div>
               {data.invoices.length === 0 ? (
                 <p className="mt-4 text-[15px] leading-relaxed text-slate">
                   No open invoices right now. When something goes past due in Stripe, it shows up here and Forja starts chasing.
@@ -262,6 +288,15 @@ export function Account() {
           </>
         )}
       </div>
+      {toast && (
+        <div
+          className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full border border-line bg-paper px-5 py-3 text-[14px] text-ink shadow-lift"
+          role="status"
+          aria-live="polite"
+        >
+          {toast}
+        </div>
+      )}
     </section>
   );
 }

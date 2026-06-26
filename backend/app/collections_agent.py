@@ -115,7 +115,7 @@ def run_sweep(user_id: Optional[int] = None, dry_run: Optional[bool] = None) -> 
             params = (user_id,)
         conns = [(r["user_id"], r["encrypted_key"]) for r in conn.execute(query, params).fetchall()]
 
-    summary = {"connections": len(conns), "synced": 0, "reminders": 0, "errors": 0, "dry_run": dry_run}
+    summary = {"connections": len(conns), "synced": 0, "reminders": 0, "skipped": 0, "errors": 0, "dry_run": dry_run}
 
     for uid, encrypted_key in conns:
         try:
@@ -142,6 +142,8 @@ def run_sweep(user_id: Optional[int] = None, dry_run: Optional[bool] = None) -> 
                 step = next_reminder_step(dict(inv), now)
                 if step is not None and send_reminder(conn, user_row, inv, step, now, dry_run):
                     summary["reminders"] += 1
+                else:
+                    summary["skipped"] += 1
 
     print(f"[collections] sweep done: {summary}")
     return summary

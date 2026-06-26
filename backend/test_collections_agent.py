@@ -35,6 +35,14 @@ assert ca.next_reminder_step(inv(reminder_step=1, last_reminder_at=iso(NOW - tim
 assert ca.next_reminder_step(inv(reminder_step=1, last_reminder_at=iso(NOW - timedelta(days=10))), NOW) == 2, "gap ok -> 2"
 print("decision logic: PASS")
 
+# ---- 1b) reminder HTML escapes untrusted names/URL ----
+from app.email import reminder_html  # noqa: E402
+
+h = reminder_html(1, "<script>Acme</script>", "O'Brien <b>", "100.00 EUR", 5, "https://x?a=1&b=2")
+assert "<script>" not in h and "&lt;script&gt;" in h, "studio name must be HTML-escaped"
+assert "&lt;b&gt;" in h, "debtor name must be HTML-escaped"
+print("email escaping: PASS")
+
 # ---- 2) run_sweep end-to-end (dry-run, Stripe sync stubbed) ----
 init_db()
 EMAIL = "collections_test@forja.studio"
@@ -75,6 +83,7 @@ summary = ca.run_sweep(user_id=uid, dry_run=True)
 print("summary:", summary)
 assert summary["connections"] == 1, summary
 assert summary["reminders"] == 2, f"expected 2 reminders, got {summary['reminders']}"
+assert summary["skipped"] == 4, f"expected 4 skipped, got {summary['skipped']}"
 
 with get_conn() as c:
     def step(sid):
