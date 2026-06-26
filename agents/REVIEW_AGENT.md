@@ -6,8 +6,8 @@ Runs before every commit. Pairs with Design Agent.
 
 ## Skills
 - vercel-labs/agent-skills (web-design-guidelines)
-- vercel-labs/agent-skills (react-best-practices)
-- anthropic/code-reviewer
+- vercel-labs/agent-skills (vercel-react-best-practices)
+- code-review@claude-plugins-official
 
 ## Trigger
 Before every git commit, or when explicitly called 

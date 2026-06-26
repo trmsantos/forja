@@ -7,7 +7,7 @@ export const brand = {
   meaning: "Portuguese for forge",
   tagline: "Get paid faster, without the awkward chasing.",
   intro:
-    "Forja connects to your Stripe account and automatically chases your overdue invoices with polite, well-timed reminders. You collect more, sooner, without lifting a finger. Built for freelancers and small studios that bill through Stripe.",
+    "Forja connects to your Stripe account and chases overdue invoices for you, with polite, automatic reminders until clients pay.",
   email: "hello@forja.studio",
 };
 

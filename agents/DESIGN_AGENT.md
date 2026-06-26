@@ -7,7 +7,7 @@ look intentional, distinctive, and production-ready.
 
 ## Skills
 - anthropic/frontend-design
-- paulbakaus/impeccable (brand mode for landing pages, 
+- pbakaus/impeccable (brand mode for landing pages, 
   product mode for dashboard and account screens)
 - Leonxlnx/taste-skill with:
     DESIGN_VARIANCE=7

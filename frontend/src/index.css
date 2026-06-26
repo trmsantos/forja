@@ -12,11 +12,16 @@
     scroll-behavior: smooth;
   }
   body {
-    @apply bg-paper text-ink font-sans antialiased;
+    @apply bg-mist text-ink font-sans antialiased;
   }
   ::selection {
     background: #f1531c;
-    color: #ffffff;
+    color: #0b0c0e;
+  }
+  /* Visible keyboard focus everywhere — quality floor (frontend-design + a11y). */
+  :focus-visible {
+    outline: 2px solid #f1531c;
+    outline-offset: 2px;
   }
 }
 
@@ -36,21 +41,25 @@
   .btn:active {
     transform: scale(0.97);
   }
+  /* Dark text on molten ember: WCAG-safe (white-on-ember fails AA) and reads sharper. */
   .btn-ember {
-    @apply btn bg-ember text-white shadow-soft hover:bg-emberdeep;
+    @apply btn bg-ember text-coal shadow-ember hover:bg-emberlit;
   }
   .btn-dark {
-    @apply btn bg-ink text-paper hover:opacity-90;
+    @apply btn bg-steel text-ink hover:bg-line;
   }
   .btn-ghost {
-    @apply btn border border-line bg-paper text-ink hover:border-ink/30;
+    @apply btn border border-line bg-paper text-ink hover:border-ember/40;
   }
   .field {
-    @apply w-full rounded-2xl border border-line bg-paper px-4 py-3 text-[15px] text-ink outline-none;
+    @apply w-full rounded-2xl border border-line bg-steel px-4 py-3 text-[15px] text-ink outline-none;
     transition: border-color 160ms var(--ease-out), box-shadow 160ms var(--ease-out);
   }
+  .field::placeholder {
+    @apply text-slate;
+  }
   .field:focus {
-    @apply border-ember ring-4 ring-ember/10;
+    @apply border-ember ring-4 ring-ember/15;
   }
   .card {
     @apply rounded-2xl border border-line bg-paper;

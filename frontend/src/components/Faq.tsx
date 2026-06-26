@@ -15,7 +15,7 @@ export function Faq() {
                 <details key={f.q} className="group border-b border-line py-5">
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-4">
                     <dt className="font-display text-lg font-bold text-ink">{f.q}</dt>
-                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-mist text-ember transition-transform duration-200 group-open:rotate-45">
+                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-steel text-ember transition-transform duration-200 group-open:rotate-45">
                       +
                     </span>
                   </summary>

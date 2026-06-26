@@ -70,7 +70,7 @@ export function Contact() {
               <button type="submit" disabled={status === "sending"} className="btn-ember disabled:opacity-60">
                 {status === "sending" ? "Sending…" : "Send it"}
               </button>
-              {status === "error" && <p className="text-[14px] text-emberdeep">Something went wrong — email us at {brand.email}.</p>}
+              {status === "error" && <p className="text-[14px] text-emberlit">Something went wrong — email us at {brand.email}.</p>}
             </form>
           )}
         </Reveal>

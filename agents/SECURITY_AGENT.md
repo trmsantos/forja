@@ -6,7 +6,7 @@ product. Critical because this project stores third-party
 Stripe API keys encrypted in the database.
 
 ## Skills
-- anthropic/security-review
+- built-in /security-review skill
 
 ## Trigger
 Any change to: backend/app/main.py, backend/app/security.py,

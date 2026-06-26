@@ -28,7 +28,7 @@ export function Pricing() {
               className={`flex flex-col rounded-3xl bg-paper p-8 ${p.featured ? "ring-2 ring-ember shadow-lift" : "border border-line"}`}
             >
               {p.featured && (
-                <span className="mb-4 inline-flex w-fit rounded-full bg-ember px-3 py-1 text-[12px] font-semibold text-white">
+                <span className="mb-4 inline-flex w-fit rounded-full bg-ember px-3 py-1 text-[12px] font-semibold text-coal">
                   Where most teams start
                 </span>
               )}

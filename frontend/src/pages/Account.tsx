@@ -14,15 +14,15 @@ function money(amount?: number | null, currency?: string | null): string {
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  open: "bg-blush text-emberdeep",
+  open: "bg-blush text-emberlit",
   paid: "bg-mint text-ink",
-  void: "bg-mist text-slate",
-  uncollectible: "bg-mist text-slate",
+  void: "bg-steel text-slate",
+  uncollectible: "bg-steel text-slate",
 };
 
 function StatusBadge({ status }: { status: string }) {
   return (
-    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[12px] font-semibold capitalize ${STATUS_STYLES[status] || "bg-mist text-slate"}`}>
+    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[12px] font-semibold capitalize ${STATUS_STYLES[status] || "bg-steel text-slate"}`}>
       {status}
     </span>
   );
@@ -32,7 +32,7 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
   return (
     <div className="card p-6 shadow-soft">
       <p className="text-[13px] font-semibold uppercase tracking-wide text-slate">{label}</p>
-      <p className={`mt-2 font-display text-3xl font-extrabold ${accent ? "text-ember" : "text-ink"}`}>{value}</p>
+      <p className={`mt-2 font-mono text-2xl font-semibold tabular-nums ${accent ? "text-ember" : "text-ink"}`}>{value}</p>
     </div>
   );
 }
@@ -121,7 +121,7 @@ export function Account() {
       <button type="submit" disabled={connecting} className={`${compact ? "btn-ghost" : "btn-ember"} disabled:opacity-60`}>
         {connecting ? "Connecting…" : compact ? "Update key & re-sync" : "Connect Stripe"}
       </button>
-      {connectErr && <p className="text-[14px] text-emberdeep">{connectErr}</p>}
+      {connectErr && <p className="text-[14px] text-emberlit">{connectErr}</p>}
     </form>
   );
 
@@ -130,7 +130,7 @@ export function Account() {
       <div className="shell py-16 sm:py-20">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="display text-[clamp(2rem,6vw,3.2rem)] text-ink">Hi, {user.name.split(" ")[0]}.</h1>
+            <h1 className="display text-3xl sm:text-4xl text-ink">Hi, {user.name.split(" ")[0]}.</h1>
             <p className="mt-2 text-[15px] text-slate">{user.email}</p>
           </div>
           <button onClick={logout} className="btn-ghost !px-5 !py-2.5 text-[14px]">
@@ -142,7 +142,7 @@ export function Account() {
           <div className="mt-8 flex flex-col gap-3 rounded-2xl border border-ember/40 bg-blush p-5 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-[15px] text-ink">Please confirm your email. We sent a link when you signed up.</p>
             {resent === "sent" ? (
-              <span className="text-[14px] font-semibold text-emberdeep">Sent — check your inbox.</span>
+              <span className="text-[14px] font-semibold text-emberlit">Sent — check your inbox.</span>
             ) : (
               <button onClick={resend} disabled={resent === "sending"} className="btn-ember !px-5 !py-2.5 text-[14px] disabled:opacity-60">
                 {resent === "sending" ? "Sending…" : "Resend email"}
@@ -152,9 +152,34 @@ export function Account() {
         )}
 
         {data === null ? (
-          <p className="mt-10 text-[15px] text-slate">
-            {errored ? "Could not load your dashboard. Refresh to try again." : "Loading…"}
-          </p>
+          errored ? (
+            <p className="mt-10 text-[15px] text-slate">Could not load your dashboard. Refresh to try again.</p>
+          ) : (
+            <div className="mt-8" role="status" aria-live="polite">
+              <span className="sr-only">Loading your dashboard…</span>
+              <div className="animate-pulse" aria-hidden>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  {[0, 1, 2, 3].map((i) => (
+                    <div key={i} className="card p-6">
+                      <div className="h-3 w-20 rounded bg-steel" />
+                      <div className="mt-3 h-7 w-24 rounded bg-steel" />
+                    </div>
+                  ))}
+                </div>
+                <div className="card mt-5 p-7">
+                  <div className="h-5 w-40 rounded bg-steel" />
+                  <div className="mt-5 space-y-4">
+                    {[0, 1, 2].map((i) => (
+                      <div key={i} className="flex items-center justify-between">
+                        <div className="h-4 w-48 rounded bg-steel" />
+                        <div className="h-4 w-16 rounded bg-steel" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
         ) : !data.connected ? (
           <div className="mt-8 card p-7 shadow-soft sm:p-9">
             <h2 className="font-display text-2xl font-bold text-ink">Connect your Stripe account</h2>
@@ -215,7 +240,7 @@ export function Account() {
                         </p>
                       </div>
                       <div className="flex items-center gap-4">
-                        <span className="font-display text-lg font-bold text-ink">{money(inv.amount_due, inv.currency)}</span>
+                        <span className="font-mono text-[15px] font-semibold tabular-nums text-ink">{money(inv.amount_due, inv.currency)}</span>
                         {inv.hosted_invoice_url && (
                           <a href={inv.hosted_invoice_url} target="_blank" rel="noreferrer" className="text-[14px] font-medium text-ember hover:underline">
                             View

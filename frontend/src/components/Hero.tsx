@@ -28,8 +28,8 @@ function ForgeMark() {
   });
   return (
     <svg viewBox="0 0 220 220" className="h-full w-full" role="img" aria-label="The Forja mark being forged">
-      {/* stamp tile */}
-      <motion.rect x="30" y="36" width="140" height="140" rx="34" fill="#16171b" {...piece(0.1)} />
+      {/* stamp tile — lifted surface with an ember stroke so it glows on the dark canvas */}
+      <motion.rect x="30" y="36" width="140" height="140" rx="34" fill="#1a1d24" stroke="#f1531c" strokeWidth="2" {...piece(0.1)} />
       {/* F bars */}
       <motion.rect x="72" y="72" width="18" height="88" rx="4" fill="#ffffff" {...piece(0.28)} />
       <motion.rect x="72" y="72" width="58" height="18" rx="4" fill="#ffffff" {...piece(0.36)} />
