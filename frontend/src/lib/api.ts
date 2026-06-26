@@ -118,3 +118,56 @@ export async function myPayments(): Promise<PaymentRecord[]> {
   if (!res.ok) throw new Error("Could not load your orders");
   return (await res.json()) as PaymentRecord[];
 }
+
+// ----- AR collections: connect Stripe, dashboard, billing -----
+export type TrackedInvoice = {
+  stripe_invoice_id: string;
+  customer_name?: string | null;
+  customer_email?: string | null;
+  amount_due?: number | null; // cents
+  currency?: string | null;
+  due_date?: string | null;
+  hosted_invoice_url?: string | null;
+  status: string;
+  reminder_step: number;
+  last_reminder_at?: string | null;
+};
+
+export type Dashboard = {
+  connected: boolean;
+  stripe_account_id: string | null;
+  last_synced_at: string | null;
+  subscription_status: string;
+  trial_ends_at: string | null;
+  totals: {
+    open_count: number;
+    outstanding_amount: number; // cents
+    recovered_amount: number; // cents
+    reminders_sent: number;
+  };
+  invoices: TrackedInvoice[];
+};
+
+export async function getDashboard(): Promise<Dashboard> {
+  const res = await fetch("/api/dashboard", { headers: { ...authHeaders() } });
+  if (!res.ok) throw new Error("Could not load your dashboard");
+  return (await res.json()) as Dashboard;
+}
+
+export type ConnectResult = { ok: boolean; synced: number; reconciled: number; stripe_account_id: string | null };
+
+export async function connectStripe(apiKey: string): Promise<ConnectResult> {
+  const res = await fetch("/api/connect/stripe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ api_key: apiKey }),
+  });
+  if (!res.ok) throw new Error(await detail(res, "Could not connect your Stripe account"));
+  return (await res.json()) as ConnectResult;
+}
+
+export async function billingPortal(): Promise<{ url: string }> {
+  const res = await fetch("/api/billing/portal", { method: "POST", headers: { ...authHeaders() } });
+  if (!res.ok) throw new Error(await detail(res, "Could not open billing"));
+  return (await res.json()) as { url: string };
+}

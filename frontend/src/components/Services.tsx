@@ -9,7 +9,7 @@ export function Services() {
     <section id="services" className="bg-paper">
       <div className="shell py-24 sm:py-28">
         <Reveal>
-          <h2 className="display max-w-[16ch] text-[clamp(1.9rem,4.5vw,3.2rem)] text-ink">Three ways we put AI to work.</h2>
+          <h2 className="display max-w-[16ch] text-[clamp(1.9rem,4.5vw,3.2rem)] text-ink">Everything it does, on autopilot.</h2>
         </Reveal>
 
         <div className="mt-14 grid gap-5 md:grid-cols-3">

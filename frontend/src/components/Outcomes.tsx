@@ -6,9 +6,9 @@ export function Outcomes() {
     <section id="work" className="bg-mist">
       <div className="shell py-24 sm:py-28">
         <Reveal>
-          <h2 className="display max-w-[18ch] text-[clamp(1.9rem,4.5vw,3.2rem)] text-ink">Work that earned its keep.</h2>
+          <h2 className="display max-w-[18ch] text-[clamp(1.9rem,4.5vw,3.2rem)] text-ink">Less chasing. More collected.</h2>
           <p className="mt-5 max-w-prose text-[17px] leading-relaxed text-slate">
-            A few of the problems we've taken from manual and slow to automatic and measured.
+            A few of the ways Forja turns overdue invoices into paid ones.
           </p>
         </Reveal>
 

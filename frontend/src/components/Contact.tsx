@@ -29,10 +29,9 @@ export function Contact() {
     <section id="contact" className="bg-paper">
       <div className="shell py-24 sm:py-28">
         <Reveal className="mx-auto max-w-2xl text-center">
-          <h2 className="display text-[clamp(2rem,4.5vw,3.2rem)] text-ink">Tell us what you want to forge.</h2>
+          <h2 className="display text-[clamp(2rem,4.5vw,3.2rem)] text-ink">Questions before you start?</h2>
           <p className="mx-auto mt-5 max-w-prose text-[17px] leading-relaxed text-slate">
-            A few lines on the problem is enough. We reply within two working days with whether we're a
-            fit and what a first step looks like.
+            Tell us how you bill and we'll tell you if Forja is a fit. We reply within two working days.
           </p>
         </Reveal>
 
@@ -63,7 +62,7 @@ export function Contact() {
               <textarea
                 required
                 rows={5}
-                placeholder="What are you trying to build or fix?"
+                placeholder="What do you use to invoice, and how many slip past due?"
                 value={form.message}
                 onChange={update("message")}
                 className="field"

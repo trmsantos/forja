@@ -37,9 +37,9 @@ export function Nav() {
               <Link to="/login" className="text-[15px] font-medium text-slate hover:text-ink">
                 Log in
               </Link>
-              <a href="/#contact" className="btn-ember !px-5 !py-2.5 text-[14px]">
-                Start a project
-              </a>
+              <Link to="/signup" className="btn-ember !px-5 !py-2.5 text-[14px]">
+                Start free
+              </Link>
             </>
           )}
         </div>
@@ -74,9 +74,9 @@ export function Nav() {
                   <Link to="/login" onClick={() => setOpen(false)} className="btn-ghost">
                     Log in
                   </Link>
-                  <a href="/#contact" onClick={() => setOpen(false)} className="btn-ember">
-                    Start a project
-                  </a>
+                  <Link to="/signup" onClick={() => setOpen(false)} className="btn-ember">
+                    Start free
+                  </Link>
                 </>
               )}
             </div>

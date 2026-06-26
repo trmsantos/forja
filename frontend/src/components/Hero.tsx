@@ -1,4 +1,5 @@
 import { motion, useReducedMotion } from "framer-motion";
+import { Link } from "react-router-dom";
 import { brand } from "../lib/content";
 
 const EASE: [number, number, number, number] = [0.23, 1, 0.32, 1];
@@ -61,9 +62,9 @@ export function Hero() {
       <div className="shell grid items-center gap-12 pt-16 pb-16 sm:pt-24 sm:pb-20 lg:grid-cols-[1.1fr_0.9fr] lg:gap-8">
         <motion.div variants={wrap} initial="hidden" animate="show" className="max-w-2xl">
           <motion.h1 variants={line} className="display text-[clamp(2.5rem,6.2vw,4.8rem)] text-ink">
-            We forge AI into products that{" "}
+            Late invoices,{" "}
             <span className="relative inline-block whitespace-nowrap text-ember">
-              actually ship
+              chased automatically
               <svg
                 className="pointer-events-none absolute -bottom-1 left-0 h-3 w-full"
                 viewBox="0 0 300 24"
@@ -90,11 +91,11 @@ export function Hero() {
           </motion.p>
 
           <motion.div variants={line} className="mt-9 flex flex-wrap items-center gap-3">
-            <a href="#contact" className="btn-ember">
-              Start a project
-            </a>
-            <a href="#work" className="btn-ghost">
-              See the work
+            <Link to="/signup" className="btn-ember">
+              Start free
+            </Link>
+            <a href="#process" className="btn-ghost">
+              See how it works
             </a>
           </motion.div>
         </motion.div>

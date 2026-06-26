@@ -1,13 +1,13 @@
 // Single source of truth for all site copy + offerings.
-// Copy is written to dodge Impeccable's "copy" slop rules: minimal em-dashes,
-// no marketing buzzwords (streamline / supercharge / world-class), no aphoristic cadence.
+// Forja is an AR-collections SaaS: it connects to a customer's Stripe (read-only) and
+// auto-chases their overdue invoices. Copy avoids buzzwords, minimal em-dashes.
 
 export const brand = {
   name: "Forja",
   meaning: "Portuguese for forge",
-  tagline: "AI, forged into products that work.",
+  tagline: "Get paid faster, without the awkward chasing.",
   intro:
-    "We design and build AI software, assistants, and automation for companies that want working products, not demos. A small senior team that ships fast and stays hands-on.",
+    "Forja connects to your Stripe account and automatically chases your overdue invoices with polite, well-timed reminders. You collect more, sooner, without lifting a finger. Built for freelancers and small studios that bill through Stripe.",
   email: "hello@forja.studio",
 };
 
@@ -20,25 +20,25 @@ export type Service = {
 
 export const services: Service[] = [
   {
-    id: "software",
-    title: "Custom AI software & SaaS",
+    id: "connect",
+    title: "Connect Stripe in a minute",
     blurb:
-      "We design and build AI products from first prototype to a product your customers pay for.",
-    bullets: ["Product & UX design", "Full-stack build", "Models, evals & guardrails", "Deploy & iterate"],
+      "Paste a read-only key. Forja imports your open invoices and starts watching the ones that slip past due.",
+    bullets: ["Read-only access", "Your data stays in Stripe", "Imports in seconds", "Disconnect anytime"],
   },
   {
-    id: "assistants",
-    title: "Chatbots & assistants",
+    id: "chase",
+    title: "Reminders that escalate, politely",
     blurb:
-      "Assistants grounded in your own data, useful on day one, and honest about what they don't know.",
-    bullets: ["RAG over your docs", "Support & internal copilots", "Voice & chat", "Human handoff"],
+      "Forja sends on-brand emails on a smart schedule, firm but friendly, each with the Stripe payment link, until the invoice is paid.",
+    bullets: ["Timed sequences", "Your tone, your sender", "Payment link included", "Stops once it's paid"],
   },
   {
-    id: "automation",
-    title: "AI automation",
+    id: "track",
+    title: "See the cash you recovered",
     blurb:
-      "We automate the manual work: the pipelines and agents that run your back office in the background.",
-    bullets: ["Workflow & agent design", "Tool & API integration", "Monitoring", "Ongoing tuning"],
+      "A simple dashboard shows what's outstanding, what's been chased, and how much Forja has helped you collect.",
+    bullets: ["Outstanding at a glance", "Reminder history", "Recovered total", "Weekly email recap"],
   },
 ];
 
@@ -49,33 +49,33 @@ export type Outcome = {
   result: string;
 };
 
-// Illustrative case studies. Replace with real client work before launch.
+// Illustrative examples. Replace with real customer results before scaling outreach.
 export const outcomes: Outcome[] = [
   {
-    client: "B2B SaaS, support team",
-    problem: "Tickets piled up overnight and first replies took six hours.",
-    built: "A support assistant grounded in their help center and past tickets, with human handoff.",
-    result: "First response down to under five minutes; 60% of tickets resolved without an agent.",
+    client: "Freelance designer",
+    problem: "Spent Friday afternoons writing awkward 'just checking in' emails about unpaid invoices.",
+    built: "Forja now sends the follow-ups automatically, in her voice, with the pay link attached.",
+    result: "Zero manual reminders, and invoices clear about a week sooner.",
   },
   {
-    client: "Logistics firm, operations",
-    problem: "Staff re-typed invoice data from PDFs into three systems by hand.",
-    built: "An extraction and reconciliation pipeline that reads invoices and posts the data.",
-    result: "Around 30 hours of manual entry removed every week, with an audit trail.",
+    client: "Five-person dev studio",
+    problem: "Two or three invoices a month quietly slipped 30+ days past due.",
+    built: "Escalating reminders go out on schedule and stop the instant Stripe marks them paid.",
+    result: "Late invoices down sharply, with no more dropped follow-ups.",
   },
   {
-    client: "Law office, research",
-    problem: "Associates lost hours searching 12,000 internal documents.",
-    built: "A research copilot that answers in plain language and cites the source document.",
-    result: "Common questions answered in seconds, every answer linked to its source.",
+    client: "Marketing consultant",
+    problem: "Never knew how much was actually outstanding at any given moment.",
+    built: "One dashboard with outstanding, chased, and recovered totals, updated from Stripe.",
+    result: "Full visibility, and cash in the bank faster.",
   },
 ];
 
 export const process = [
-  { n: "01", title: "Scope", text: "A short, paid discovery. We map the problem, the data, and what 'done' means." },
-  { n: "02", title: "Forge", text: "We build in the open, with weekly demos. You see it take shape, not a black box." },
-  { n: "03", title: "Ship", text: "It goes live with evals and monitoring, so it keeps working after launch." },
-  { n: "04", title: "Tend", text: "Optional retainer: we keep it sharp as your needs and the models change." },
+  { n: "01", title: "Connect", text: "Add a read-only Stripe key. Forja imports your open invoices right away." },
+  { n: "02", title: "Watch", text: "It tracks due dates and flags invoices the moment they slip past due." },
+  { n: "03", title: "Chase", text: "Polite, escalating reminders go out on a schedule, each with the payment link." },
+  { n: "04", title: "Get paid", text: "The sequence stops the instant Stripe marks the invoice paid. You watch the total climb." },
 ];
 
 export type Pkg = {
@@ -91,31 +91,31 @@ export type Pkg = {
 
 export const packages: Pkg[] = [
   {
-    id: "audit",
-    name: "AI Audit",
-    price: "€1,900",
-    cadence: "fixed scope",
-    summary: "A two-week sprint to find where AI pays off in your business, and where it does not.",
-    features: ["Opportunity map", "Feasibility & cost notes", "A working proof-of-concept", "Build recommendation"],
+    id: "solo",
+    name: "Solo",
+    price: "€19",
+    cadence: "per month",
+    summary: "For freelancers who bill a handful of clients.",
+    features: ["1 Stripe account", "Up to 25 tracked invoices", "The standard reminder sequence", "Recovered-cash dashboard"],
     action: "buy",
   },
   {
-    id: "automation-starter",
-    name: "Automation Starter",
-    price: "€3,500",
-    cadence: "fixed scope",
-    summary: "We pick one painful manual process and automate it end to end, in production.",
-    features: ["One workflow, fully built", "Integrated with your tools", "Monitoring dashboard", "30 days of tuning"],
+    id: "studio",
+    name: "Studio",
+    price: "€49",
+    cadence: "per month",
+    summary: "For small studios and agencies that can't afford a dropped follow-up.",
+    features: ["Everything in Solo", "Unlimited tracked invoices", "Custom reminder tone & timing", "Weekly email recap"],
     action: "buy",
     featured: true,
   },
   {
-    id: "build",
-    name: "Custom Build",
-    price: "Let's scope it",
-    cadence: "project or retainer",
-    summary: "A full product or a standing partnership. We build the thing and stay to keep it sharp.",
-    features: ["Dedicated build team", "Product + AI engineering", "Weekly demos", "Retainer option"],
+    id: "agency",
+    name: "Agency",
+    price: "€99",
+    cadence: "per month",
+    summary: "For teams billing across multiple Stripe accounts.",
+    features: ["Everything in Studio", "Multiple Stripe accounts", "Branded sender domain", "Priority support"],
     action: "quote",
   },
 ];
@@ -125,14 +125,14 @@ export type Testimonial = { quote: string; name: string; role: string };
 // Illustrative. Replace with real quotes before launch.
 export const testimonials: Testimonial[] = [
   {
-    quote: "They shipped a working assistant in three weeks that our last vendor quoted six months for.",
+    quote: "I used to dread chasing invoices. Now it just happens, and clients pay faster without me being the bad guy.",
     name: "Marta Reis",
-    role: "COO, fintech",
+    role: "Freelance designer",
   },
   {
-    quote: "No jargon, no theater. Weekly demos meant we always knew exactly where things stood.",
+    quote: "We stopped letting invoices slip through the cracks. The reminders are polite, on-brand, and relentless.",
     name: "Daniel Khoury",
-    role: "Head of Ops, logistics",
+    role: "Studio founder",
   },
 ];
 
@@ -140,26 +140,26 @@ export type Faq = { q: string; a: string };
 
 export const faqs: Faq[] = [
   {
-    q: "How fast can we start?",
-    a: "Most engagements begin within a week. The AI Audit and Automation Starter are fixed-scope, so we can kick off as soon as you buy.",
+    q: "Is my Stripe data safe?",
+    a: "Forja only ever uses a read-only restricted key, and your key is encrypted before it's stored. We read your invoices to chase them, nothing more, and you can disconnect in one click.",
   },
   {
-    q: "Who owns the code?",
-    a: "You do. Everything we build is yours, in your repositories and your infrastructure, with no lock-in.",
+    q: "Will it email my clients without me knowing?",
+    a: "You stay in control. You set the tone and schedule, can preview reminders, and Forja stops the moment an invoice is paid. Nothing goes out before you switch it on.",
   },
   {
-    q: "What about our data?",
-    a: "We work inside your accounts where possible and never train third-party models on your data. Data handling is agreed in writing before we start.",
+    q: "What if I don't use Stripe?",
+    a: "For now Forja is built specifically for businesses that invoice through Stripe. Other tools are on the roadmap, so tell us what you use.",
   },
   {
-    q: "We're not a technical team. Is that a problem?",
-    a: "No. We translate between the business and the build, and the weekly demos are made to be understood by anyone.",
+    q: "How much does it cost?",
+    a: "Plans start at €19/month with a 14-day free trial, no card to start. Most studios are on the €49 plan. If we recover a single late invoice, we've more than paid for ourselves.",
   },
 ];
 
 export const nav = [
-  { label: "Services", href: "/#services" },
-  { label: "Work", href: "/#work" },
+  { label: "How it works", href: "/#process" },
+  { label: "Results", href: "/#work" },
   { label: "Pricing", href: "/#pricing" },
-  { label: "Contact", href: "/#contact" },
+  { label: "FAQ", href: "/#faq" },
 ];

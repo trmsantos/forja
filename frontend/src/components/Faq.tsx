@@ -3,7 +3,7 @@ import { Reveal } from "./Reveal";
 
 export function Faq() {
   return (
-    <section className="bg-paper">
+    <section id="faq" className="bg-paper">
       <div className="shell py-24 sm:py-28">
         <div className="grid gap-10 lg:grid-cols-12">
           <Reveal className="lg:col-span-4">

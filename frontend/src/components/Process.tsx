@@ -14,7 +14,7 @@ export function Process() {
       <div className="shell py-24 sm:py-28">
         <Reveal>
           <h2 className="display max-w-[20ch] text-[clamp(1.9rem,4.5vw,3.2rem)] text-ink">
-            No black box. You watch it take shape.
+            From overdue to paid, on its own.
           </h2>
         </Reveal>
 

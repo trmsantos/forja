@@ -1,17 +1,18 @@
 import { motion } from "framer-motion";
+import { Link } from "react-router-dom";
 import { packages } from "../lib/content";
 import { Reveal } from "./Reveal";
 
-// Prices intentionally not shown — engagements are quoted. (Stripe pay-by-link handles payment.)
+// Self-serve subscription pricing. "buy" tiers start a free trial via /signup; "quote" tiers route to contact.
 export function Pricing() {
   return (
     <section id="pricing" className="bg-mist">
       <div className="shell py-24 sm:py-28">
         <Reveal>
-          <h2 className="display text-[clamp(1.9rem,4.5vw,3.2rem)] text-ink">Ways to work together.</h2>
+          <h2 className="display text-[clamp(1.9rem,4.5vw,3.2rem)] text-ink">Simple pricing. It pays for itself.</h2>
           <p className="mt-5 max-w-prose text-[17px] leading-relaxed text-slate">
-            Start with a focused engagement or a full build. We scope and quote every project up front,
-            so you know exactly what you're committing to before we begin.
+            Every plan starts with a 14-day free trial, no card to start. If Forja recovers a single
+            late invoice, it has already paid for itself.
           </p>
         </Reveal>
 
@@ -32,6 +33,10 @@ export function Pricing() {
                 </span>
               )}
               <h3 className="font-display text-2xl font-bold tracking-tight2 text-ink">{p.name}</h3>
+              <div className="mt-3 flex items-baseline gap-1.5">
+                <span className="font-display text-3xl font-extrabold text-ink">{p.price}</span>
+                <span className="text-[14px] text-slate">{p.cadence}</span>
+              </div>
               <p className="mt-3 text-[15px] leading-relaxed text-slate">{p.summary}</p>
               <ul className="mt-6 space-y-3 border-t border-line pt-6">
                 {p.features.map((f) => (
@@ -42,9 +47,15 @@ export function Pricing() {
                 ))}
               </ul>
               <div className="mt-8 pt-2">
-                <a href="#contact" className={`w-full ${p.featured ? "btn-ember" : "btn-ghost"}`}>
-                  {p.action === "buy" ? "Get started" : "Let's talk"}
-                </a>
+                {p.action === "buy" ? (
+                  <Link to="/signup" className={`w-full ${p.featured ? "btn-ember" : "btn-ghost"}`}>
+                    Start free
+                  </Link>
+                ) : (
+                  <a href="#contact" className="w-full btn-ghost">
+                    Talk to us
+                  </a>
+                )}
               </div>
             </motion.div>
           ))}
