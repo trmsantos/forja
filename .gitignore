@@ -27,3 +27,6 @@ vite.config.js.timestamp-*.mjs
 *.swp
 .idea/
 .vscode/
+
+# --- Claude Code (personal/local config; shared .claude/settings.json is fine to commit) ---
+.claude/settings.local.json
