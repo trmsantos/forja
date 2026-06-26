@@ -30,6 +30,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field
 
 from .db import get_conn, init_db
+from .stripe_sync import sync_invoices
 from .email import (
     STUDIO_EMAIL,
     lead_confirmation_html,
@@ -73,6 +74,25 @@ bearer = HTTPBearer(auto_error=True)
 @app.on_event("startup")
 def _startup() -> None:
     init_db()
+    _maybe_start_scheduler()
+
+
+def _maybe_start_scheduler() -> None:
+    """Start the daily Collections sweep — only when COLLECTIONS_ENABLED=1, so the engine
+    never emails real debtors by accident on a fresh boot."""
+    if os.getenv("COLLECTIONS_ENABLED", "0") != "1":
+        print("[collections] scheduler disabled (set COLLECTIONS_ENABLED=1 for daily sweeps)")
+        return
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.cron import CronTrigger
+
+    from .collections_agent import run_sweep
+
+    hour = int(os.getenv("COLLECTIONS_HOUR", "9"))
+    scheduler = BackgroundScheduler(timezone="UTC")
+    scheduler.add_job(run_sweep, CronTrigger(hour=hour, minute=0), id="collections_sweep", replace_existing=True)
+    scheduler.start()
+    print(f"[collections] scheduler started — daily sweep at {hour:02d}:00 UTC")
 
 
 # ---------- models ----------
@@ -268,71 +288,7 @@ def account_payments(user: dict = Depends(current_user)) -> list:
     ]
 
 
-# ---------- AR collections: connect Stripe, sync invoices, dashboard ----------
-def _upsert_invoice(conn: sqlite3.Connection, user_id: int, inv, now: str) -> None:
-    """Insert or refresh one tracked invoice. Idempotent on (user_id, stripe id)."""
-    due = inv.get("due_date")
-    due_iso = datetime.fromtimestamp(due, tz=timezone.utc).isoformat() if due else None
-    conn.execute(
-        """
-        INSERT INTO tracked_invoices
-            (user_id, stripe_invoice_id, customer_name, customer_email, amount_due,
-             currency, due_date, hosted_invoice_url, status, reminder_step, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', 0, ?, ?)
-        ON CONFLICT(user_id, stripe_invoice_id) DO UPDATE SET
-            customer_name = excluded.customer_name,
-            customer_email = excluded.customer_email,
-            amount_due = excluded.amount_due,
-            currency = excluded.currency,
-            due_date = excluded.due_date,
-            hosted_invoice_url = excluded.hosted_invoice_url,
-            status = 'open',
-            updated_at = excluded.updated_at
-        """,
-        (
-            user_id, inv["id"], inv.get("customer_name"), inv.get("customer_email"),
-            inv.get("amount_due"), inv.get("currency"), due_iso,
-            inv.get("hosted_invoice_url"), now, now,
-        ),
-    )
-
-
-def _sync_invoices(user_id: int, api_key: str) -> dict:
-    """Pull the customer's open invoices into tracked_invoices and reconcile any that
-    are no longer open (paid/void) so the dashboard's recovered total stays accurate.
-    Network reads happen outside the DB write so we don't hold a write lock on Stripe I/O."""
-    import stripe
-
-    stripe.api_key = api_key
-    now = datetime.now(timezone.utc).isoformat()
-
-    fetched = list(stripe.Invoice.list(status="open", limit=100).auto_paging_iter())
-    open_ids = {inv["id"] for inv in fetched}
-
-    with get_conn() as conn:
-        for inv in fetched:
-            _upsert_invoice(conn, user_id, inv, now)
-        previously_open = conn.execute(
-            "SELECT id, stripe_invoice_id FROM tracked_invoices WHERE user_id = ? AND status = 'open'",
-            (user_id,),
-        ).fetchall()
-        conn.execute("UPDATE connections SET last_synced_at = ? WHERE user_id = ?", (now, user_id))
-
-    stale = [r for r in previously_open if r["stripe_invoice_id"] not in open_ids]
-    for r in stale:
-        try:
-            inv = stripe.Invoice.retrieve(r["stripe_invoice_id"])
-            with get_conn() as conn:
-                conn.execute(
-                    "UPDATE tracked_invoices SET status = ?, updated_at = ? WHERE id = ?",
-                    (inv.get("status"), now, r["id"]),
-                )
-        except Exception:
-            pass  # transient Stripe error; next sync retries
-
-    return {"synced": len(fetched), "reconciled": len(stale)}
-
-
+# ---------- AR collections: connect Stripe, dashboard, billing ----------
 @app.post("/api/connect/stripe")
 def connect_stripe(body: ConnectStripeIn, user: dict = Depends(current_user)) -> dict:
     """Store the customer's read-only Stripe key (encrypted) and do a first sync."""
@@ -369,7 +325,7 @@ def connect_stripe(body: ConnectStripeIn, user: dict = Depends(current_user)) ->
             (user["id"], account_id, encrypt_secret(key), now, now),
         )
 
-    result = _sync_invoices(user["id"], key)
+    result = sync_invoices(user["id"], key)
     return {"ok": True, "stripe_account_id": account_id, **result}
 
 
@@ -439,6 +395,14 @@ def billing_portal(user: dict = Depends(current_user)) -> dict:
         customer=customer_id, return_url=f"{FRONTEND_ORIGIN}/account"
     )
     return {"url": session.url}
+
+
+@app.post("/api/collections/run")
+def collections_run(user: dict = Depends(current_user)) -> dict:
+    """Manually trigger a collections sweep for the logged-in user (respects COLLECTIONS_DRY_RUN)."""
+    from .collections_agent import run_sweep
+
+    return run_sweep(user_id=user["id"])
 
 
 def _set_subscription(

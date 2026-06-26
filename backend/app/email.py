@@ -26,8 +26,11 @@ _INK = "#15120e"
 _EMBER = "#dc5424"
 
 
-def _send_resend(to: str, subject: str, html: str) -> bool:
-    data = json.dumps({"from": EMAIL_FROM, "to": [to], "subject": subject, "html": html}).encode("utf-8")
+def _send_resend(to: str, subject: str, html: str, reply_to: "str | None" = None) -> bool:
+    payload = {"from": EMAIL_FROM, "to": [to], "subject": subject, "html": html}
+    if reply_to:
+        payload["reply_to"] = reply_to
+    data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         "https://api.resend.com/emails",
         data=data,
@@ -42,7 +45,7 @@ def _send_resend(to: str, subject: str, html: str) -> bool:
         return False
 
 
-def _send_smtp(to: str, subject: str, html: str) -> bool:
+def _send_smtp(to: str, subject: str, html: str, reply_to: "str | None" = None) -> bool:
     import smtplib
     import ssl
     from email.message import EmailMessage  # standard library
@@ -51,6 +54,8 @@ def _send_smtp(to: str, subject: str, html: str) -> bool:
     msg["Subject"] = subject
     msg["From"] = EMAIL_FROM
     msg["To"] = to
+    if reply_to:
+        msg["Reply-To"] = reply_to
     msg.set_content("This message is best viewed in an HTML-capable email client.")
     msg.add_alternative(html, subtype="html")
     try:
@@ -65,11 +70,11 @@ def _send_smtp(to: str, subject: str, html: str) -> bool:
         return False
 
 
-def send_email(to: str, subject: str, html: str) -> bool:
+def send_email(to: str, subject: str, html: str, reply_to: "str | None" = None) -> bool:
     if RESEND_API_KEY:
-        return _send_resend(to, subject, html)
+        return _send_resend(to, subject, html, reply_to)
     if SMTP_HOST and SMTP_USER:
-        return _send_smtp(to, subject, html)
+        return _send_smtp(to, subject, html, reply_to)
     print(f"\n[email:dev] would send to {to}\n  subject: {subject}\n  (set RESEND_API_KEY or SMTP_* to send for real)\n")
     return False
 
@@ -78,7 +83,7 @@ def _shell(body: str) -> str:
     return (
         f'<div style="font-family:Archivo,Arial,sans-serif;max-width:520px;margin:0 auto;'
         f'color:{_INK};line-height:1.6;">{body}'
-        f'<p style="margin-top:32px;font-size:13px;color:#79746c;">Forja — AI, forged into products that work.</p></div>'
+        f'<p style="margin-top:32px;font-size:13px;color:#79746c;">Forja — get paid faster.</p></div>'
     )
 
 
@@ -120,4 +125,45 @@ def receipt_html(description: str, amount_display: str) -> str:
         f'<tr><td style="padding:6px 16px 6px 0;color:#79746c;">Amount</td><td style="padding:6px 0;"><strong>{amount_display}</strong></td></tr>'
         f'</table>'
         f'<p style="font-size:13px;color:#79746c;">A formal invoice from Stripe will arrive separately.</p>'
+    )
+
+
+def reminder_subject(step: int, studio: str, days_overdue: int) -> str:
+    if step <= 1:
+        return f"Reminder: your invoice from {studio} is overdue"
+    if step == 2:
+        return f"Second reminder: invoice from {studio} is {days_overdue} days overdue"
+    return f"Final reminder: overdue invoice from {studio}"
+
+
+def reminder_html(
+    step: int, studio: str, debtor_name: str, amount_display: str, days_overdue: int, pay_url: "str | None" = None
+) -> str:
+    """Escalating, polite-to-firm reminder sent to the debtor on behalf of the vendor."""
+    if step <= 1:
+        lead = (f"This is a friendly reminder that your invoice from {studio} "
+                f"(<strong>{amount_display}</strong>) is now {days_overdue} days past due.")
+        close = "If you've already paid, please ignore this note, and thank you."
+    elif step == 2:
+        lead = (f"A second reminder that your invoice from {studio} "
+                f"(<strong>{amount_display}</strong>) is now {days_overdue} days overdue.")
+        close = "Please arrange payment at your earliest convenience."
+    else:
+        lead = (f"This is a final reminder that your invoice from {studio} "
+                f"(<strong>{amount_display}</strong>) remains unpaid and is {days_overdue} days overdue.")
+        close = "Please settle this invoice promptly to avoid further follow-up."
+
+    button = (
+        f'<p style="margin:28px 0;"><a href="{pay_url}" '
+        f'style="background:{_EMBER};color:#fff;text-decoration:none;padding:12px 22px;border-radius:4px;font-weight:600;">'
+        f'Pay this invoice</a></p>'
+    ) if pay_url else ""
+
+    return _shell(
+        f'<h1 style="font-size:22px;">Hi {debtor_name},</h1>'
+        f'<p>{lead}</p>'
+        f'{button}'
+        f'<p>{close}</p>'
+        f'<p style="margin-top:24px;">Thank you,<br>{studio}</p>'
+        f'<p style="font-size:12px;color:#9a958c;margin-top:20px;">Sent on behalf of {studio} via Forja.</p>'
     )
