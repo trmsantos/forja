@@ -43,6 +43,7 @@ from .security import (
     create_token,
     decode_email_token,
     decode_token,
+    encrypt_secret,
     hash_password,
     verify_password,
 )
@@ -100,6 +101,11 @@ class Lead(BaseModel):
 
 class CheckoutRequest(BaseModel):
     package_id: str
+
+
+class ConnectStripeIn(BaseModel):
+    # A Stripe restricted key (rk_…) with read access to Invoices.
+    api_key: str = Field(min_length=12, max_length=200)
 
 
 # ---------- helpers ----------
@@ -262,6 +268,200 @@ def account_payments(user: dict = Depends(current_user)) -> list:
     ]
 
 
+# ---------- AR collections: connect Stripe, sync invoices, dashboard ----------
+def _upsert_invoice(conn: sqlite3.Connection, user_id: int, inv, now: str) -> None:
+    """Insert or refresh one tracked invoice. Idempotent on (user_id, stripe id)."""
+    due = inv.get("due_date")
+    due_iso = datetime.fromtimestamp(due, tz=timezone.utc).isoformat() if due else None
+    conn.execute(
+        """
+        INSERT INTO tracked_invoices
+            (user_id, stripe_invoice_id, customer_name, customer_email, amount_due,
+             currency, due_date, hosted_invoice_url, status, reminder_step, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', 0, ?, ?)
+        ON CONFLICT(user_id, stripe_invoice_id) DO UPDATE SET
+            customer_name = excluded.customer_name,
+            customer_email = excluded.customer_email,
+            amount_due = excluded.amount_due,
+            currency = excluded.currency,
+            due_date = excluded.due_date,
+            hosted_invoice_url = excluded.hosted_invoice_url,
+            status = 'open',
+            updated_at = excluded.updated_at
+        """,
+        (
+            user_id, inv["id"], inv.get("customer_name"), inv.get("customer_email"),
+            inv.get("amount_due"), inv.get("currency"), due_iso,
+            inv.get("hosted_invoice_url"), now, now,
+        ),
+    )
+
+
+def _sync_invoices(user_id: int, api_key: str) -> dict:
+    """Pull the customer's open invoices into tracked_invoices and reconcile any that
+    are no longer open (paid/void) so the dashboard's recovered total stays accurate.
+    Network reads happen outside the DB write so we don't hold a write lock on Stripe I/O."""
+    import stripe
+
+    stripe.api_key = api_key
+    now = datetime.now(timezone.utc).isoformat()
+
+    fetched = list(stripe.Invoice.list(status="open", limit=100).auto_paging_iter())
+    open_ids = {inv["id"] for inv in fetched}
+
+    with get_conn() as conn:
+        for inv in fetched:
+            _upsert_invoice(conn, user_id, inv, now)
+        previously_open = conn.execute(
+            "SELECT id, stripe_invoice_id FROM tracked_invoices WHERE user_id = ? AND status = 'open'",
+            (user_id,),
+        ).fetchall()
+        conn.execute("UPDATE connections SET last_synced_at = ? WHERE user_id = ?", (now, user_id))
+
+    stale = [r for r in previously_open if r["stripe_invoice_id"] not in open_ids]
+    for r in stale:
+        try:
+            inv = stripe.Invoice.retrieve(r["stripe_invoice_id"])
+            with get_conn() as conn:
+                conn.execute(
+                    "UPDATE tracked_invoices SET status = ?, updated_at = ? WHERE id = ?",
+                    (inv.get("status"), now, r["id"]),
+                )
+        except Exception:
+            pass  # transient Stripe error; next sync retries
+
+    return {"synced": len(fetched), "reconciled": len(stale)}
+
+
+@app.post("/api/connect/stripe")
+def connect_stripe(body: ConnectStripeIn, user: dict = Depends(current_user)) -> dict:
+    """Store the customer's read-only Stripe key (encrypted) and do a first sync."""
+    import stripe
+
+    key = body.api_key.strip()
+    stripe.api_key = key
+    try:
+        stripe.Invoice.list(limit=1)  # validate the key can actually read invoices
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="That key didn't work. Use a Stripe restricted key (rk_…) with read access to Invoices.",
+        )
+
+    account_id = None
+    try:
+        account_id = stripe.Account.retrieve().get("id")
+    except Exception:
+        pass  # restricted key may not expose the account; not required
+
+    now = datetime.now(timezone.utc).isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO connections (user_id, stripe_account_id, encrypted_key, status, last_synced_at, created_at)
+            VALUES (?, ?, ?, 'active', ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                stripe_account_id = excluded.stripe_account_id,
+                encrypted_key = excluded.encrypted_key,
+                status = 'active',
+                last_synced_at = excluded.last_synced_at
+            """,
+            (user["id"], account_id, encrypt_secret(key), now, now),
+        )
+
+    result = _sync_invoices(user["id"], key)
+    return {"ok": True, "stripe_account_id": account_id, **result}
+
+
+@app.get("/api/dashboard")
+def dashboard(user: dict = Depends(current_user)) -> dict:
+    """Everything the account view needs: connection state, money totals, invoices."""
+    with get_conn() as conn:
+        conn_row = conn.execute(
+            "SELECT stripe_account_id, status, last_synced_at FROM connections WHERE user_id = ?",
+            (user["id"],),
+        ).fetchone()
+        sub_row = conn.execute(
+            "SELECT subscription_status, trial_ends_at FROM users WHERE id = ?", (user["id"],)
+        ).fetchone()
+        open_row = conn.execute(
+            "SELECT COUNT(*) AS c, COALESCE(SUM(amount_due), 0) AS s "
+            "FROM tracked_invoices WHERE user_id = ? AND status = 'open'",
+            (user["id"],),
+        ).fetchone()
+        recovered = conn.execute(
+            "SELECT COALESCE(SUM(amount_due), 0) AS s FROM tracked_invoices WHERE user_id = ? AND status = 'paid'",
+            (user["id"],),
+        ).fetchone()["s"]
+        reminders = conn.execute(
+            "SELECT COUNT(*) AS c FROM reminders_sent WHERE user_id = ?", (user["id"],)
+        ).fetchone()["c"]
+        invoices = conn.execute(
+            "SELECT stripe_invoice_id, customer_name, customer_email, amount_due, currency, "
+            "due_date, hosted_invoice_url, status, reminder_step, last_reminder_at "
+            "FROM tracked_invoices WHERE user_id = ? ORDER BY due_date IS NULL, due_date ASC",
+            (user["id"],),
+        ).fetchall()
+
+    return {
+        "connected": bool(conn_row) and conn_row["status"] == "active",
+        "stripe_account_id": conn_row["stripe_account_id"] if conn_row else None,
+        "last_synced_at": conn_row["last_synced_at"] if conn_row else None,
+        "subscription_status": sub_row["subscription_status"] if sub_row else "none",
+        "trial_ends_at": sub_row["trial_ends_at"] if sub_row else None,
+        "totals": {
+            "open_count": open_row["c"],
+            "outstanding_amount": open_row["s"],
+            "recovered_amount": recovered,
+            "reminders_sent": reminders,
+        },
+        "invoices": [dict(r) for r in invoices],
+    }
+
+
+@app.post("/api/billing/portal")
+def billing_portal(user: dict = Depends(current_user)) -> dict:
+    """Stripe Customer Portal session on OUR account, so customers self-manage the €49/mo plan."""
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=400, detail="Billing isn't configured yet.")
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT stripe_customer_id FROM users WHERE id = ?", (user["id"],)
+        ).fetchone()
+    customer_id = row["stripe_customer_id"] if row else None
+    if not customer_id:
+        raise HTTPException(status_code=400, detail="No subscription is linked to this account yet.")
+
+    import stripe
+
+    stripe.api_key = STRIPE_SECRET_KEY
+    session = stripe.billing_portal.Session.create(
+        customer=customer_id, return_url=f"{FRONTEND_ORIGIN}/account"
+    )
+    return {"url": session.url}
+
+
+def _set_subscription(
+    customer_id: Optional[str], status: Optional[str], trial_iso: Optional[str], email: Optional[str] = None
+) -> None:
+    """Update a user's subscription state. Matches by Stripe customer id; falls back to
+    email (used at checkout, the one event that carries both id and email)."""
+    if not customer_id:
+        return
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE users SET subscription_status = ?, trial_ends_at = ?, stripe_customer_id = ? "
+            "WHERE stripe_customer_id = ?",
+            (status, trial_iso, customer_id, customer_id),
+        )
+        if cur.rowcount == 0 and email:
+            conn.execute(
+                "UPDATE users SET subscription_status = ?, trial_ends_at = ?, stripe_customer_id = ? "
+                "WHERE email = ?",
+                (status, trial_iso, customer_id, email.lower()),
+            )
+
+
 def _record_payment(email: str, description: str, amount: Optional[int], currency: Optional[str], stripe_id: str) -> bool:
     """Insert a paid order. Idempotent on stripe_id; returns True only on first insert."""
     now = datetime.now(timezone.utc).isoformat()
@@ -314,6 +514,18 @@ async def stripe_webhook(request: Request) -> dict:
         currency = obj.get("currency")
         description = (obj.get("metadata") or {}).get("description") or description
         stripe_id = obj.get("id")
+        # Subscription checkout: link the Stripe customer to this user now, so later
+        # customer.subscription.* events (which carry only the customer id) can match.
+        if (obj.get("mode") == "subscription" or obj.get("subscription")) and email:
+            _set_subscription(obj.get("customer"), "active", None, email=email)
+    elif etype.startswith("customer.subscription."):
+        status = "canceled" if etype.endswith(".deleted") else obj.get("status")
+        trial_end = obj.get("trial_end")
+        trial_iso = (
+            datetime.fromtimestamp(trial_end, tz=timezone.utc).isoformat() if trial_end else None
+        )
+        _set_subscription(obj.get("customer"), status, trial_iso)
+        return {"received": True}
     elif etype in ("invoice.paid", "invoice.payment_succeeded"):
         email = obj.get("customer_email")
         amount = obj.get("amount_paid")

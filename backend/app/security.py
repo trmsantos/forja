@@ -1,14 +1,21 @@
-"""Password hashing (bcrypt) and JWT tokens (PyJWT)."""
+"""Password hashing (bcrypt), JWT tokens (PyJWT), and secret encryption (Fernet)."""
 
+import base64
+import hashlib
 import os
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
+from cryptography.fernet import Fernet, InvalidToken
 
 JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret-change-in-production")
 JWT_ALGORITHM = "HS256"
 TOKEN_TTL_DAYS = 7
+
+# Used to encrypt customer Stripe keys at rest. Kept separate from JWT_SECRET on
+# purpose: a JWT-secret leak must not also expose stored Stripe credentials.
+ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "dev-secret-change-in-production")
 
 
 def hash_password(password: str) -> str:
@@ -51,3 +58,24 @@ def decode_email_token(token: str, purpose: str = "verify") -> int:
     if payload.get("purpose") != purpose:
         raise ValueError("Wrong token purpose")
     return int(payload["sub"])
+
+
+# ---------- secret encryption (for customer Stripe keys at rest) ----------
+def _fernet() -> Fernet:
+    """A Fernet built from ENCRYPTION_KEY. Any passphrase works: we hash it to the
+    32-byte url-safe key Fernet requires, so the operator sets a plain string in .env."""
+    digest = hashlib.sha256(ENCRYPTION_KEY.encode("utf-8")).digest()
+    return Fernet(base64.urlsafe_b64encode(digest))
+
+
+def encrypt_secret(plaintext: str) -> str:
+    """Encrypt a sensitive string (e.g. a Stripe restricted key) for DB storage."""
+    return _fernet().encrypt(plaintext.encode("utf-8")).decode("utf-8")
+
+
+def decrypt_secret(token: str) -> str:
+    """Reverse of encrypt_secret. Raises ValueError if the ciphertext or key is wrong."""
+    try:
+        return _fernet().decrypt(token.encode("utf-8")).decode("utf-8")
+    except InvalidToken as exc:
+        raise ValueError("Could not decrypt secret (wrong ENCRYPTION_KEY?)") from exc
