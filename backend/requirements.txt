@@ -1,0 +1,9 @@
+# Version floors chosen so prebuilt wheels exist for Python 3.13 and 3.14
+# (avoids compiling from source with Rust). bcrypt ships abi3 wheels.
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.32
+pydantic[email]>=2.11
+python-dotenv>=1.0.1
+stripe>=11.0
+bcrypt>=4.1
+PyJWT>=2.9

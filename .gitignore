@@ -1,0 +1,29 @@
+# --- Secrets & local data (never commit) ---
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+leads.jsonl
+
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# --- Node / frontend ---
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# --- Vite build artifacts ---
+vite.config.js.timestamp-*.mjs
+
+# --- OS / editor ---
+.DS_Store
+*.swp
+.idea/
+.vscode/

@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Emil Kowalski's easing blueprint — built-in curves are too weak. */
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+    --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-paper text-ink font-sans antialiased;
+  }
+  ::selection {
+    background: #f1531c;
+    color: #ffffff;
+  }
+}
+
+@layer components {
+  .shell {
+    @apply mx-auto w-full max-w-shell px-6 sm:px-8;
+  }
+  .display {
+    @apply font-display font-bold tracking-tight2 leading-[1.02];
+  }
+  /* Specific properties only (never `all`); press feedback per Emil. */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-6 py-3 text-[15px] font-semibold;
+    transition: transform 160ms var(--ease-out), background-color 160ms ease, border-color 160ms ease,
+      color 160ms ease, box-shadow 160ms ease;
+  }
+  .btn:active {
+    transform: scale(0.97);
+  }
+  .btn-ember {
+    @apply btn bg-ember text-white shadow-soft hover:bg-emberdeep;
+  }
+  .btn-dark {
+    @apply btn bg-ink text-paper hover:opacity-90;
+  }
+  .btn-ghost {
+    @apply btn border border-line bg-paper text-ink hover:border-ink/30;
+  }
+  .field {
+    @apply w-full rounded-2xl border border-line bg-paper px-4 py-3 text-[15px] text-ink outline-none;
+    transition: border-color 160ms var(--ease-out), box-shadow 160ms var(--ease-out);
+  }
+  .field:focus {
+    @apply border-ember ring-4 ring-ember/10;
+  }
+  .card {
+    @apply rounded-2xl border border-line bg-paper;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
