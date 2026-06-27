@@ -101,6 +101,60 @@ summary2 = ca.run_sweep(user_id=uid, dry_run=True)
 assert summary2["reminders"] == 0, f"re-run should send 0, got {summary2['reminders']}"
 print("idempotent re-run: PASS")
 
+# ---- 4) regression: Stripe object field access survives stripe-python v15 ----
+# stripe-python v15's StripeObject dropped dict-style .get(); upsert_invoice used to call
+# inv.get(...) and blew up with "AttributeError: get" the first time a real invoice synced
+# (it stayed hidden while every sweep had 0 invoices). This pins the subscript-based _field()
+# accessor so a future SDK bump can't silently rebreak sync again.
+from app.stripe_sync import _field, upsert_invoice  # noqa: E402
+
+
+class _FakeStripeObject:
+    """Mimics a stripe-python v15 Invoice: supports obj["key"] but NOT obj.get()
+    (unknown attributes fall through to keys, so .get raises AttributeError)."""
+
+    def __init__(self, data):
+        self._data = data
+
+    def __getitem__(self, key):
+        return self._data[key]  # raises KeyError when absent, like StripeObject
+
+    def __getattr__(self, key):
+        try:
+            return self._data[key]
+        except KeyError:
+            raise AttributeError(key)
+
+
+_fake = _FakeStripeObject({"currency": "eur"})
+# guard: the fake must reproduce v15 (no .get), else the test would prove nothing
+try:
+    _fake.get("currency")
+    raise AssertionError("FakeStripeObject must not support .get() — it should mimic stripe v15")
+except AttributeError:
+    pass
+assert _field(_fake, "currency") == "eur", "_field reads present keys via subscript"
+assert _field(_fake, "missing") is None, "_field defaults a missing key to None"
+assert _field(_fake, "missing", "fallback") == "fallback", "_field honors an explicit default"
+
+_due = NOW - timedelta(days=3)
+_inv = _FakeStripeObject({
+    "id": "regress_field", "customer_name": "Régrèss", "customer_email": "r@acme.test",
+    "amount_due": 12345, "currency": "eur", "due_date": int(_due.timestamp()),
+    "hosted_invoice_url": "https://pay/regress",
+})
+with get_conn() as c:
+    upsert_invoice(c, uid, _inv, iso(NOW))  # must NOT raise "AttributeError: get"
+    r = c.execute(
+        "SELECT customer_name, customer_email, amount_due, currency, due_date, hosted_invoice_url "
+        "FROM tracked_invoices WHERE user_id=? AND stripe_invoice_id='regress_field'", (uid,),
+    ).fetchone()
+assert r is not None, "upsert_invoice must insert the synced row"
+assert r["amount_due"] == 12345 and r["currency"] == "eur", dict(r)
+assert r["customer_email"] == "r@acme.test", dict(r)
+assert r["due_date"].startswith(_due.date().isoformat()), r["due_date"]
+print("stripe field access (v15 regression): PASS")
+
 with get_conn() as c:
     c.execute("DELETE FROM users WHERE id = ?", (uid,))  # cascade cleans connection/invoices/reminders
 print("\nALL COLLECTIONS TESTS PASSED")

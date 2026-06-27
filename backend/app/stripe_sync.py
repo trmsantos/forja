@@ -11,9 +11,19 @@ from datetime import datetime, timezone
 from .db import get_conn
 
 
+def _field(obj, key, default=None):
+    """Safe field read for Stripe objects. stripe-python v15's StripeObject dropped
+    dict-style .get(), so subscript with a KeyError fallback is the portable accessor
+    (works on v11+ too)."""
+    try:
+        return obj[key]
+    except KeyError:
+        return default
+
+
 def upsert_invoice(conn: sqlite3.Connection, user_id: int, inv, now: str) -> None:
     """Insert or refresh one tracked invoice. Idempotent on (user_id, stripe id)."""
-    due = inv.get("due_date")
+    due = _field(inv, "due_date")
     due_iso = datetime.fromtimestamp(due, tz=timezone.utc).isoformat() if due else None
     conn.execute(
         """
@@ -32,9 +42,9 @@ def upsert_invoice(conn: sqlite3.Connection, user_id: int, inv, now: str) -> Non
             updated_at = excluded.updated_at
         """,
         (
-            user_id, inv["id"], inv.get("customer_name"), inv.get("customer_email"),
-            inv.get("amount_due"), inv.get("currency"), due_iso,
-            inv.get("hosted_invoice_url"), now, now,
+            user_id, inv["id"], _field(inv, "customer_name"), _field(inv, "customer_email"),
+            _field(inv, "amount_due"), _field(inv, "currency"), due_iso,
+            _field(inv, "hosted_invoice_url"), now, now,
         ),
     )
 
@@ -67,7 +77,7 @@ def sync_invoices(user_id: int, api_key: str) -> dict:
             with get_conn() as conn:
                 conn.execute(
                     "UPDATE tracked_invoices SET status = ?, updated_at = ? WHERE id = ?",
-                    (inv.get("status"), now, r["id"]),
+                    (_field(inv, "status"), now, r["id"]),
                 )
         except Exception:
             pass  # transient Stripe error; next sweep retries

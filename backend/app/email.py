@@ -10,7 +10,20 @@ Nothing here can raise into a request — a failed send just returns False and l
 import html
 import json
 import os
+import ssl
+import urllib.error
 import urllib.request
+
+# Verify TLS against certifi's CA bundle rather than OpenSSL's default paths, which are
+# often absent on macOS python.org builds (and vary by host) — otherwise the HTTPS call
+# to Resend dies with CERTIFICATE_VERIFY_FAILED. Falls back to the system store if certifi
+# isn't installed.
+try:
+    import certifi
+
+    _SSL_CTX: "ssl.SSLContext | None" = ssl.create_default_context(cafile=certifi.where())
+except Exception:  # pragma: no cover - certifi is a declared dependency
+    _SSL_CTX = ssl.create_default_context()
 
 # Resend
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
@@ -36,11 +49,24 @@ def _send_resend(to: str, subject: str, html: str, reply_to: "str | None" = None
         "https://api.resend.com/emails",
         data=data,
         method="POST",
-        headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+            # Cloudflare (in front of Resend) blocks the default "Python-urllib" UA with
+            # error 1010, so identify ourselves with a normal User-Agent.
+            "User-Agent": "Forja/1.0 (+https://forja.studio)",
+        },
     )
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as resp:
+            rid = json.loads(resp.read() or b"{}").get("id")
+            print(f"[email] Resend accepted '{subject}' -> {to} (id={rid})")
             return resp.status < 300
+    except urllib.error.HTTPError as exc:
+        # Surface Resend's reason (e.g. unverified sending domain) instead of a bare status.
+        body = exc.read().decode("utf-8", "replace")
+        print(f"[email] Resend rejected the send (HTTP {exc.code}): {body}")
+        return False
     except Exception as exc:
         print("[email] Resend send failed:", exc)
         return False

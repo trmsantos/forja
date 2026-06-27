@@ -24,6 +24,12 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from dotenv import load_dotenv
+
+# Load .env BEFORE importing app modules — .email and .security read env vars at
+# import time (RESEND_API_KEY, JWT_SECRET, ENCRYPTION_KEY), so loading after those
+# imports would leave them snapshotting unset values / defaults.
+load_dotenv()
+
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -48,8 +54,6 @@ from .security import (
     hash_password,
     verify_password,
 )
-
-load_dotenv()
 
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:4000")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
