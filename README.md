@@ -72,6 +72,8 @@ Set them for production via `fly secrets set` (never commit `.env`).
 | `COLLECTIONS_HOUR` | Hour (UTC) of the daily sweep. Default `9`. |
 | `COLLECTIONS_MAX_STEPS` | Max reminders per invoice. Default `3`. |
 | `COLLECTIONS_MIN_GAP_DAYS` | Minimum days between reminders. Default `7`. |
+| `RECAP_DAY` | Day of week (`mon`…`sun`) for the weekly customer recap email. Default `mon`. |
+| `RECAP_HOUR` | Hour (UTC) for the weekly recap. Default `8`. Same `COLLECTIONS_ENABLED` gate + `COLLECTIONS_DRY_RUN` safety as the sweep. |
 
 ### Branded sender domain (recommended)
 
@@ -158,6 +160,10 @@ Set the backend's `FRONTEND_ORIGIN` to the Vercel domain so CORS allows it.
   `COLLECTIONS_MAX_STEPS` and never sends two within `COLLECTIONS_MIN_GAP_DAYS`. Trigger a
   one-off sweep for the logged-in user with `POST /api/collections/run` (the "Run chase now"
   button). **Dry-run is the default** so it never emails real debtors until you opt in.
+- **Weekly recap** (retention): a second scheduled job emails each subscribed customer a summary
+  (outstanding · recovered this week · reminders sent · open invoices). Goes to the *customer*,
+  never to debtors; same `COLLECTIONS_ENABLED` gate and `COLLECTIONS_DRY_RUN` safety. Timing via
+  `RECAP_DAY` / `RECAP_HOUR` (default Monday 08:00 UTC).
 
 ## Before launch
 

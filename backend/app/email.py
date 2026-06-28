@@ -198,3 +198,48 @@ def reminder_html(
         f'<p style="margin-top:24px;">Thank you,<br>{studio}</p>'
         f'<p style="font-size:12px;color:#9a958c;margin-top:20px;">Sent on behalf of {studio} via Forja.</p>'
     )
+
+
+def recap_subject(studio: str) -> str:
+    """Subject for the weekly recap sent to the Forja customer (never to debtors)."""
+    return f"Your Forja week in review, {studio}"
+
+
+def recap_html(
+    studio: str,
+    outstanding_display: str,
+    recovered_display: str,
+    reminders_sent: int,
+    open_count: int,
+    dashboard_url: "str | None" = None,
+) -> str:
+    """Weekly summary for the Forja customer: what's outstanding, what came in, and the work
+    Forja did on their behalf this week. Same on-brand shell as the reminder emails."""
+    studio = html.escape(studio)
+    safe_url = html.escape(dashboard_url, quote=True) if dashboard_url else None
+
+    def row(label: str, value: str, accent: bool = False) -> str:
+        color = _EMBER if accent else _INK
+        return (
+            f'<tr><td style="padding:8px 16px 8px 0;color:#79746c;">{label}</td>'
+            f'<td style="padding:8px 0;font-weight:600;color:{color};">{value}</td></tr>'
+        )
+
+    button = (
+        f'<p style="margin:28px 0;"><a href="{safe_url}" '
+        f'style="background:{_EMBER};color:#fff;text-decoration:none;padding:12px 22px;border-radius:4px;font-weight:600;">'
+        f'Open your dashboard</a></p>'
+    ) if safe_url else ""
+
+    return _shell(
+        f'<h1 style="font-size:22px;">Hi {studio},</h1>'
+        f'<p>Here&rsquo;s how your collections are going this week.</p>'
+        f'<table style="margin:20px 0;font-size:15px;border-collapse:collapse;">'
+        f'{row("Outstanding", outstanding_display)}'
+        f'{row("Recovered this week", recovered_display, accent=True)}'
+        f'{row("Reminders sent", str(reminders_sent))}'
+        f'{row("Open invoices", str(open_count))}'
+        f'</table>'
+        f'<p>Forja is watching your invoices and chasing the overdue ones for you. Nothing for you to do.</p>'
+        f'{button}'
+    )

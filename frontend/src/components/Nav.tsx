@@ -28,6 +28,9 @@ export function Nav() {
         )}
 
         <div className="hidden items-center gap-4 md:flex">
+          <Link to="/audit" className="text-[15px] font-medium text-slate transition-colors hover:text-ink">
+            Free audit
+          </Link>
           {user ? (
             <Link to="/account" className="btn-dark !px-5 !py-2.5 text-[14px]">
               {user.name.split(" ")[0]}
@@ -64,6 +67,9 @@ export function Nav() {
                 {n.label}
               </a>
             ))}
+            <Link to="/audit" onClick={() => setOpen(false)} className="rounded-xl px-2 py-3 text-[16px] font-medium text-ink hover:bg-mist">
+              Free audit
+            </Link>
             <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3">
               {user ? (
                 <Link to="/account" onClick={() => setOpen(false)} className="btn-dark">

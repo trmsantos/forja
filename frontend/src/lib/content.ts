@@ -71,6 +71,23 @@ export const outcomes: Outcome[] = [
   },
 ];
 
+// Why Forja, when Stripe can already send a reminder. This is the page's most important
+// section: it answers the one objection every Stripe user has ("don't I have this already?").
+export const comparison = {
+  heading: "More than Stripe's built-in reminder.",
+  intro:
+    "Stripe can fire off a single fixed reminder if you set it up. Forja runs the whole chase for you, escalating and on-brand, with the cash you've recovered always in plain sight.",
+  stripeLabel: "Stripe's built-in reminders",
+  forjaLabel: "Forja",
+  rows: [
+    { label: "Cadence", stripe: "One fixed template", forja: "A gentle → firm → final sequence that escalates on its own" },
+    { label: "Tone & branding", stripe: "Generic sender, generic wording", forja: "Your voice, your domain, the client's name" },
+    { label: "Visibility", stripe: "No recovered-cash view", forja: "Outstanding · chased · recovered, in one dashboard" },
+    { label: "Effort", stripe: "You configure it and keep watching", forja: "Connect once; Forja runs it while you work" },
+    { label: "Stops when paid", stripe: "Yes", forja: "Yes, the instant Stripe marks it paid" },
+  ],
+};
+
 export const process = [
   { n: "01", title: "Connect", text: "Add a read-only Stripe key. Forja imports your open invoices right away." },
   { n: "02", title: "Watch", text: "It tracks due dates and flags invoices the moment they slip past due." },
@@ -140,6 +157,10 @@ export type Faq = { q: string; a: string };
 
 export const faqs: Faq[] = [
   {
+    q: "How is this different from Stripe's built-in reminders?",
+    a: "Stripe can send a single, fixed reminder if you configure it. Forja runs the whole chase for you: a polite sequence that escalates over time, in your brand's voice, and a dashboard showing exactly how much it has recovered. You connect once and it just runs, then stops the moment an invoice is paid.",
+  },
+  {
     q: "Is my Stripe data safe?",
     a: "Forja only ever uses a read-only restricted key, and your key is encrypted before it's stored. We read your invoices to chase them, nothing more, and you can disconnect in one click.",
   },
@@ -158,6 +179,7 @@ export const faqs: Faq[] = [
 ];
 
 export const nav = [
+  { label: "Why Forja", href: "/#why" },
   { label: "How it works", href: "/#process" },
   { label: "Results", href: "/#work" },
   { label: "Pricing", href: "/#pricing" },

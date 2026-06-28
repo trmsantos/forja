@@ -36,7 +36,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field
 
 from .db import get_conn, init_db
-from .stripe_sync import sync_invoices
+from .stripe_sync import audit_summary, sync_invoices
 from .email import (
     STUDIO_EMAIL,
     lead_confirmation_html,
@@ -62,6 +62,18 @@ PACKAGE_PRICES = {
     "audit": os.getenv("STRIPE_PRICE_AUDIT", ""),
     "automation-starter": os.getenv("STRIPE_PRICE_AUTOMATION", ""),
 }
+
+# Recurring subscription plans — the actual revenue model. Each maps to a Stripe Price id
+# created on Forja's OWN account. Without these set, /api/billing/subscribe returns a friendly
+# "not configured yet" message instead of failing — same pattern as one-off checkout.
+SUBSCRIPTION_PRICES = {
+    "solo": os.getenv("STRIPE_PRICE_SOLO", ""),
+    "studio": os.getenv("STRIPE_PRICE_STUDIO", ""),
+    "agency": os.getenv("STRIPE_PRICE_AGENCY", ""),
+}
+TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "14"))
+# A plan in one of these states may use the collections engine; everything else is paywalled.
+ACTIVE_PLAN_STATUSES = {"active", "trialing"}
 
 app = FastAPI(title="Forja API", version="0.3.0")
 
@@ -90,13 +102,25 @@ def _maybe_start_scheduler() -> None:
     from apscheduler.schedulers.background import BackgroundScheduler
     from apscheduler.triggers.cron import CronTrigger
 
-    from .collections_agent import run_sweep
+    from .collections_agent import run_sweep, run_weekly_recap
 
     hour = int(os.getenv("COLLECTIONS_HOUR", "9"))
     scheduler = BackgroundScheduler(timezone="UTC")
     scheduler.add_job(run_sweep, CronTrigger(hour=hour, minute=0), id="collections_sweep", replace_existing=True)
+
+    # Weekly retention recap to subscribed customers (defaults: Monday 08:00 UTC).
+    recap_day = os.getenv("RECAP_DAY", "mon")
+    recap_hour = int(os.getenv("RECAP_HOUR", "8"))
+    scheduler.add_job(
+        run_weekly_recap,
+        CronTrigger(day_of_week=recap_day, hour=recap_hour, minute=0),
+        id="weekly_recap",
+        replace_existing=True,
+    )
+
     scheduler.start()
     print(f"[collections] scheduler started — daily sweep at {hour:02d}:00 UTC")
+    print(f"[recap] weekly recap scheduled — {recap_day} {recap_hour:02d}:00 UTC")
 
 
 # ---------- models ----------
@@ -127,9 +151,20 @@ class CheckoutRequest(BaseModel):
     package_id: str
 
 
+class SubscribeIn(BaseModel):
+    # Which recurring plan to start. Defaults to the featured "studio" tier.
+    plan: str = Field(default="studio")
+
+
 class ConnectStripeIn(BaseModel):
     # A Stripe restricted key (rk_…) with read access to Invoices.
     api_key: str = Field(min_length=12, max_length=200)
+
+
+class AuditIn(BaseModel):
+    # Public lead-magnet: a read-only Stripe key, plus an optional email to capture as a lead.
+    api_key: str = Field(min_length=12, max_length=200)
+    email: Optional[EmailStr] = None
 
 
 # ---------- helpers ----------
@@ -146,6 +181,16 @@ def _send_verification(user_id: int, name: str, email: str) -> None:
     token = create_email_token(user_id, "verify")
     link = f"{FRONTEND_ORIGIN}/verify?token={token}"
     send_email(email, "Confirm your Forja account", verification_html(name, link))
+
+
+def _plan_is_active(user_id: int) -> bool:
+    """True if the user has a subscription that entitles them to the collections engine
+    (active or trialing). This is the paywall: chasing is gated on it."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT subscription_status FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+    return bool(row) and row["subscription_status"] in ACTIVE_PLAN_STATUSES
 
 
 def current_user(creds: HTTPAuthorizationCredentials = Depends(bearer)) -> dict:
@@ -254,6 +299,49 @@ def create_lead(lead: Lead) -> dict:
     )
     send_email(lead.email, "We got your message — Forja", lead_confirmation_html(lead.name))
     return {"ok": True}
+
+
+@app.post("/api/audit")
+def audit(body: AuditIn) -> dict:
+    """Public lead magnet (no signup): read a visitor's Stripe invoices and return a one-time
+    overdue summary. STATELESS by design — the key and invoices are read in memory and never
+    persisted. Only an optional email is captured, as a lead (same table as /api/leads)."""
+    import stripe
+
+    key = body.api_key.strip()
+    stripe.api_key = key
+    try:
+        stripe.Invoice.list(limit=1)  # validate the key reads invoices (same check as /api/connect/stripe)
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="That key didn't work. Use a Stripe restricted key (rk_…) with read access to Invoices.",
+        )
+
+    summary = audit_summary(key)  # read-only, in-memory; nothing is stored
+
+    # Optional lead capture — best-effort, never blocks or fails the preview.
+    if body.email:
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            note = (
+                f"Free audit: {summary['overdue_count']} overdue of {summary['outstanding_count']} open invoices · "
+                f"{(summary['overdue_amount'] or 0) / 100:.2f} {summary['currency'].upper()} overdue."
+            )
+            with get_conn() as conn:
+                conn.execute(
+                    "INSERT INTO leads (name, email, company, service, message, at) VALUES (?, ?, ?, ?, ?, ?)",
+                    ("Audit lead", body.email.lower(), None, "audit", note, now),
+                )
+            send_email(
+                STUDIO_EMAIL,
+                f"New audit lead: {body.email.lower()}",
+                lead_notification_html("Audit lead", body.email, "", "Free overdue-invoice audit", note),
+            )
+        except Exception as exc:
+            print("[audit] lead capture failed:", exc)
+
+    return summary
 
 
 @app.post("/api/checkout")
@@ -379,6 +467,49 @@ def dashboard(user: dict = Depends(current_user)) -> dict:
     }
 
 
+@app.post("/api/billing/subscribe")
+def billing_subscribe(body: SubscribeIn, user: dict = Depends(current_user)) -> dict:
+    """Start (or restart) a subscription: a Stripe Checkout Session in subscription mode on
+    OUR account, with a free trial. The webhook links the resulting customer to this user and
+    flips subscription_status to trialing/active. Returns a friendly message (not an error)
+    when Stripe isn't configured yet, so the dev/demo flow never hard-fails."""
+    if body.plan not in SUBSCRIPTION_PRICES:
+        raise HTTPException(status_code=400, detail="Unknown plan. Choose solo, studio, or agency.")
+    price_id = SUBSCRIPTION_PRICES.get(body.plan)
+    # Known plan, but Stripe isn't wired up yet (no secret key or no price id for this plan).
+    # Return a friendly message (not an error) so the dev/demo flow never hard-fails.
+    if not STRIPE_SECRET_KEY or not price_id:
+        return {
+            "message": (
+                "Subscriptions aren't switched on yet. Add STRIPE_SECRET_KEY and the plan price "
+                f"ID for '{body.plan}' (STRIPE_PRICE_{body.plan.upper()}) to backend/.env, then "
+                "restart the backend."
+            )
+        }
+
+    import stripe
+
+    stripe.api_key = STRIPE_SECRET_KEY
+    try:
+        session = stripe.checkout.Session.create(
+            mode="subscription",
+            line_items=[{"price": price_id, "quantity": 1}],
+            customer_email=user["email"],
+            client_reference_id=str(user["id"]),  # lets the webhook match the user even before a customer id exists
+            subscription_data={"trial_period_days": TRIAL_DAYS},
+            allow_promotion_codes=True,
+            success_url=f"{FRONTEND_ORIGIN}/account?subscription=success",
+            cancel_url=f"{FRONTEND_ORIGIN}/account?subscription=cancelled",
+        )
+    except Exception as exc:
+        # Surface Stripe's own message (e.g. "No such price", "Invalid API Key", test/live
+        # mismatch) instead of an opaque 500, so the cause is visible in the UI and the log.
+        detail = getattr(exc, "user_message", None) or str(exc)
+        print("[billing] Stripe checkout create failed:", repr(exc))
+        raise HTTPException(status_code=400, detail=f"Stripe: {detail}")
+    return {"url": session.url}
+
+
 @app.post("/api/billing/portal")
 def billing_portal(user: dict = Depends(current_user)) -> dict:
     """Stripe Customer Portal session on OUR account, so customers self-manage the €49/mo plan."""
@@ -403,7 +534,13 @@ def billing_portal(user: dict = Depends(current_user)) -> dict:
 
 @app.post("/api/collections/run")
 def collections_run(user: dict = Depends(current_user)) -> dict:
-    """Manually trigger a collections sweep for the logged-in user (respects COLLECTIONS_DRY_RUN)."""
+    """Manually trigger a collections sweep for the logged-in user (respects COLLECTIONS_DRY_RUN).
+    Paywalled: requires an active or trialing subscription."""
+    if not _plan_is_active(user["id"]):
+        raise HTTPException(
+            status_code=402,
+            detail="Start your free trial to switch on automatic chasing.",
+        )
     from .collections_agent import run_sweep
 
     return run_sweep(user_id=user["id"])
@@ -484,8 +621,25 @@ async def stripe_webhook(request: Request) -> dict:
         stripe_id = obj.get("id")
         # Subscription checkout: link the Stripe customer to this user now, so later
         # customer.subscription.* events (which carry only the customer id) can match.
-        if (obj.get("mode") == "subscription" or obj.get("subscription")) and email:
-            _set_subscription(obj.get("customer"), "active", None, email=email)
+        # We created the session with a trial, so mark it trialing; the subsequent
+        # customer.subscription.* event then keeps the exact status in sync.
+        if obj.get("mode") == "subscription" or obj.get("subscription"):
+            customer_id = obj.get("customer")
+            ref = obj.get("client_reference_id")
+            linked = False
+            if ref and customer_id:
+                try:
+                    with get_conn() as conn:
+                        conn.execute(
+                            "UPDATE users SET stripe_customer_id = ?, subscription_status = 'trialing' "
+                            "WHERE id = ?",
+                            (customer_id, int(ref)),
+                        )
+                    linked = True
+                except (ValueError, sqlite3.Error):
+                    linked = False
+            if not linked and email:
+                _set_subscription(customer_id, "trialing", None, email=email)
     elif etype.startswith("customer.subscription."):
         status = "canceled" if etype.endswith(".deleted") else obj.get("status")
         trial_end = obj.get("trial_end")

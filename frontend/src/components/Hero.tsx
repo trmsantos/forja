@@ -98,6 +98,13 @@ export function Hero() {
               See how it works
             </a>
           </motion.div>
+
+          <motion.p variants={line} className="mt-4 text-[14px] text-slate">
+            No account yet?{" "}
+            <Link to="/audit" className="font-medium text-ember hover:underline">
+              Get a free overdue-invoice audit &rarr;
+            </Link>
+          </motion.p>
         </motion.div>
 
         <div className="mx-auto w-full max-w-[300px] sm:max-w-[360px]">

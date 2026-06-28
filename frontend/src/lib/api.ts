@@ -41,6 +41,32 @@ export async function submitLead(payload: LeadPayload): Promise<void> {
   if (!res.ok) throw new Error(`Lead failed (${res.status})`);
 }
 
+// ----- Public lead-magnet: stateless overdue-invoice audit (no signup, key never stored) -----
+export type AuditSummary = {
+  outstanding_amount: number; // cents
+  outstanding_count: number;
+  overdue_count: number;
+  overdue_amount: number; // cents
+  oldest_overdue: {
+    customer_name?: string | null;
+    amount_due: number; // cents
+    currency?: string | null;
+    due_date: string;
+    days_overdue: number;
+  } | null;
+  currency: string;
+};
+
+export async function runAudit(apiKey: string, email?: string): Promise<AuditSummary> {
+  const res = await fetch("/api/audit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ api_key: apiKey, email: email || undefined }),
+  });
+  if (!res.ok) throw new Error(await detail(res, "Could not run the audit"));
+  return (await res.json()) as AuditSummary;
+}
+
 export async function startCheckout(packageId: string): Promise<{ url?: string; message?: string }> {
   const res = await fetch("/api/checkout", {
     method: "POST",
@@ -170,6 +196,20 @@ export async function billingPortal(): Promise<{ url: string }> {
   const res = await fetch("/api/billing/portal", { method: "POST", headers: { ...authHeaders() } });
   if (!res.ok) throw new Error(await detail(res, "Could not open billing"));
   return (await res.json()) as { url: string };
+}
+
+export type PlanId = "solo" | "studio" | "agency";
+
+// Starts a Stripe Checkout subscription (with free trial). Returns a URL to redirect to,
+// or a message when billing isn't configured yet (dev/demo).
+export async function startSubscription(plan: PlanId): Promise<{ url?: string; message?: string }> {
+  const res = await fetch("/api/billing/subscribe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ plan }),
+  });
+  if (!res.ok) throw new Error(await detail(res, "Could not start your subscription"));
+  return (await res.json()) as { url?: string; message?: string };
 }
 
 export type SweepResult = {

@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 
 import { Hero } from "../components/Hero";
 import { Services } from "../components/Services";
+import { Comparison } from "../components/Comparison";
 import { Outcomes } from "../components/Outcomes";
 import { Process } from "../components/Process";
 import { Testimonials } from "../components/Testimonials";
@@ -24,6 +25,7 @@ export function Home() {
     <div>
       <Hero />
       <Services />
+      <Comparison />
       <Outcomes />
       <Process />
       <Testimonials />

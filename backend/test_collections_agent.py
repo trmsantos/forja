@@ -52,6 +52,8 @@ with get_conn() as c:
         "INSERT INTO users (name, email, password_hash, email_verified, created_at) VALUES (?,?,?,1,?)",
         ("Test Studio", EMAIL, "x", iso(NOW)),
     ).lastrowid
+    # The collections engine is paywalled — the sweep only touches subscribed users.
+    c.execute("UPDATE users SET subscription_status = 'active' WHERE id = ?", (uid,))
     c.execute(
         "INSERT INTO connections (user_id, encrypted_key, status, created_at) VALUES (?,?,?,?)",
         (uid, encrypt_secret("rk_test"), "active", iso(NOW)),
@@ -154,6 +156,92 @@ assert r["amount_due"] == 12345 and r["currency"] == "eur", dict(r)
 assert r["customer_email"] == "r@acme.test", dict(r)
 assert r["due_date"].startswith(_due.date().isoformat()), r["due_date"]
 print("stripe field access (v15 regression): PASS")
+
+# ---- 5) paywall: a user without an active/trialing subscription is never swept ----
+UNSUB_EMAIL = "collections_unsub@forja.studio"
+with get_conn() as c:
+    c.execute("DELETE FROM users WHERE email = ?", (UNSUB_EMAIL,))
+    unsub_uid = c.execute(
+        "INSERT INTO users (name, email, password_hash, email_verified, created_at) VALUES (?,?,?,1,?)",
+        ("No Plan", UNSUB_EMAIL, "x", iso(NOW)),
+    ).lastrowid
+    # subscription_status stays at its 'none' default — i.e. not paying.
+    c.execute(
+        "INSERT INTO connections (user_id, encrypted_key, status, created_at) VALUES (?,?,?,?)",
+        (unsub_uid, encrypt_secret("rk_test"), "active", iso(NOW)),
+    )
+    c.execute(
+        "INSERT INTO tracked_invoices (user_id, stripe_invoice_id, customer_name, customer_email, amount_due, "
+        "currency, due_date, hosted_invoice_url, status, reminder_step, last_reminder_at, created_at, updated_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (unsub_uid, "unsub_overdue", "Acme", "ap@acme.test", 50000, "eur",
+         iso(NOW - timedelta(days=10)), "https://pay/unsub", "open", 0, None, iso(NOW), iso(NOW)),
+    )
+
+unsub_summary = ca.run_sweep(user_id=unsub_uid, dry_run=True)
+assert unsub_summary["connections"] == 0, f"unsubscribed user must be skipped, got {unsub_summary}"
+assert unsub_summary["reminders"] == 0, unsub_summary
+with get_conn() as c:
+    c.execute("DELETE FROM users WHERE id = ?", (unsub_uid,))
+print("paywall gating: PASS")
+
+# ---- 6) weekly recap: selects only subscribed users, with correct weekly totals (no network) ----
+RECAP_SUB = "recap_subbed@forja.studio"
+RECAP_FREE = "recap_free@forja.studio"
+with get_conn() as c:
+    for em in (RECAP_SUB, RECAP_FREE):
+        c.execute("DELETE FROM users WHERE email = ?", (em,))
+    sub_id = c.execute(
+        "INSERT INTO users (name, email, password_hash, email_verified, created_at) VALUES (?,?,?,1,?)",
+        ("Sub Studio", RECAP_SUB, "x", iso(NOW)),
+    ).lastrowid
+    c.execute("UPDATE users SET subscription_status = 'active' WHERE id = ?", (sub_id,))
+    free_id = c.execute(
+        "INSERT INTO users (name, email, password_hash, email_verified, created_at) VALUES (?,?,?,1,?)",
+        ("Free Studio", RECAP_FREE, "x", iso(NOW)),
+    ).lastrowid  # stays subscription_status='none' — must be excluded from recaps
+
+    def rinv(owner, sid, status, amount, updated):
+        c.execute(
+            "INSERT INTO tracked_invoices (user_id, stripe_invoice_id, customer_name, customer_email, amount_due, "
+            "currency, due_date, hosted_invoice_url, status, reminder_step, last_reminder_at, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (owner, sid, "C", "c@x.test", amount, "eur", iso(NOW - timedelta(days=10)),
+             "https://pay/" + sid, status, 0, None, iso(NOW), updated),
+        )
+
+    rinv(sub_id, "rs_open1", "open", 10000, iso(NOW))
+    rinv(sub_id, "rs_open2", "open", 20000, iso(NOW))
+    rinv(sub_id, "rs_paid_recent", "paid", 50000, iso(NOW - timedelta(days=2)))   # recovered this week
+    rinv(sub_id, "rs_paid_old", "paid", 99999, iso(NOW - timedelta(days=30)))     # outside the 7-day window
+    rinv(free_id, "rf_open", "open", 70000, iso(NOW))                             # free user — must be excluded
+
+    open1_id = c.execute(
+        "SELECT id FROM tracked_invoices WHERE user_id=? AND stripe_invoice_id='rs_open1'", (sub_id,)
+    ).fetchone()["id"]
+    for label, sent in [("a", NOW - timedelta(days=1)), ("b", NOW - timedelta(days=3)), ("c", NOW - timedelta(days=20))]:
+        c.execute(
+            "INSERT INTO reminders_sent (invoice_id, user_id, step, channel, to_email, subject, sent_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (open1_id, sub_id, 1, "email", "c@x.test", "subj-" + label, iso(sent)),
+        )
+
+recaps = ca.collect_recaps(NOW)
+by_email = {r["email"]: r for r in recaps}
+assert RECAP_SUB in by_email, "subscribed user must get a recap"
+assert RECAP_FREE not in by_email, "non-subscribed user must be excluded from recaps"
+sub = by_email[RECAP_SUB]
+assert sub["outstanding"] == 30000, sub            # 10000 + 20000 open
+assert sub["recovered_this_week"] == 50000, sub    # only the invoice paid within the window
+assert sub["reminders_this_week"] == 2, sub        # only the two reminders within 7 days
+assert sub["open_count"] == 2, sub
+recap_summary = ca.run_weekly_recap(dry_run=True)  # dry-run: logs, sends nothing
+assert recap_summary["dry_run"] is True and recap_summary["recipients"] >= 1, recap_summary
+print("weekly recap selection + totals: PASS")
+
+with get_conn() as c:
+    for em in (RECAP_SUB, RECAP_FREE):
+        c.execute("DELETE FROM users WHERE email = ?", (em,))
 
 with get_conn() as c:
     c.execute("DELETE FROM users WHERE id = ?", (uid,))  # cascade cleans connection/invoices/reminders

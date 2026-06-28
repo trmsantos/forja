@@ -14,16 +14,17 @@ Safety:
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from .db import get_conn
-from .email import reminder_html, reminder_subject, send_email
+from .email import recap_html, recap_subject, reminder_html, reminder_subject, send_email
 from .security import decrypt_secret
 from .stripe_sync import sync_invoices
 
 MAX_STEPS = int(os.getenv("COLLECTIONS_MAX_STEPS", "3"))
 MIN_GAP_DAYS = int(os.getenv("COLLECTIONS_MIN_GAP_DAYS", "7"))
+RECAP_WINDOW_DAYS = 7  # the "this week" window for recovered cash + reminders sent
 
 
 def _parse(dt_iso: Optional[str]) -> Optional[datetime]:
@@ -108,10 +109,16 @@ def run_sweep(user_id: Optional[int] = None, dry_run: Optional[bool] = None) -> 
     now = datetime.now(timezone.utc)
 
     with get_conn() as conn:
-        query = "SELECT user_id, encrypted_key FROM connections WHERE status = 'active'"
+        # Paywall: only sweep connections whose owner has an active or trialing subscription.
+        # The engine is the paid feature, so an expired/canceled plan stops the chasing.
+        query = (
+            "SELECT c.user_id, c.encrypted_key FROM connections c "
+            "JOIN users u ON u.id = c.user_id "
+            "WHERE c.status = 'active' AND u.subscription_status IN ('active', 'trialing')"
+        )
         params: tuple = ()
         if user_id is not None:
-            query += " AND user_id = ?"
+            query += " AND c.user_id = ?"
             params = (user_id,)
         conns = [(r["user_id"], r["encrypted_key"]) for r in conn.execute(query, params).fetchall()]
 
@@ -146,4 +153,89 @@ def run_sweep(user_id: Optional[int] = None, dry_run: Optional[bool] = None) -> 
                     summary["skipped"] += 1
 
     print(f"[collections] sweep done: {summary}")
+    return summary
+
+
+def collect_recaps(now: datetime) -> list:
+    """Per subscribed user, the numbers for their weekly recap. DB-only (no Stripe), so the
+    selection + totals are unit-testable without the network. Only active/trialing plans get a
+    recap (the engine is the paid feature). Amounts are in cents."""
+    week_ago = (now - timedelta(days=RECAP_WINDOW_DAYS)).isoformat()
+    recaps: list = []
+    with get_conn() as conn:
+        users = conn.execute(
+            "SELECT id, name, email FROM users WHERE subscription_status IN ('active', 'trialing')"
+        ).fetchall()
+        for u in users:
+            outstanding = conn.execute(
+                "SELECT COALESCE(SUM(amount_due), 0) AS s FROM tracked_invoices "
+                "WHERE user_id = ? AND status = 'open'",
+                (u["id"],),
+            ).fetchone()["s"]
+            open_count = conn.execute(
+                "SELECT COUNT(*) AS c FROM tracked_invoices WHERE user_id = ? AND status = 'open'",
+                (u["id"],),
+            ).fetchone()["c"]
+            # Recovered "this week" = invoices that flipped to paid in the window (updated_at is
+            # bumped by the re-sync reconciliation when Stripe marks them paid).
+            recovered = conn.execute(
+                "SELECT COALESCE(SUM(amount_due), 0) AS s FROM tracked_invoices "
+                "WHERE user_id = ? AND status = 'paid' AND updated_at >= ?",
+                (u["id"], week_ago),
+            ).fetchone()["s"]
+            reminders = conn.execute(
+                "SELECT COUNT(*) AS c FROM reminders_sent WHERE user_id = ? AND sent_at >= ?",
+                (u["id"], week_ago),
+            ).fetchone()["c"]
+            cur_row = conn.execute(
+                "SELECT currency FROM tracked_invoices WHERE user_id = ? AND currency IS NOT NULL LIMIT 1",
+                (u["id"],),
+            ).fetchone()
+            recaps.append(
+                {
+                    "user_id": u["id"],
+                    "name": u["name"],
+                    "email": u["email"],
+                    "outstanding": outstanding,
+                    "recovered_this_week": recovered,
+                    "reminders_this_week": reminders,
+                    "open_count": open_count,
+                    "currency": cur_row["currency"] if cur_row else "eur",
+                }
+            )
+    return recaps
+
+
+def run_weekly_recap(dry_run: Optional[bool] = None) -> dict:
+    """Email each subscribed customer a weekly summary (goes to the customer, never to debtors).
+
+    Honors COLLECTIONS_DRY_RUN by default (logs instead of sending). The scheduler only wires
+    this up when COLLECTIONS_ENABLED=1 (see main.py)."""
+    if dry_run is None:
+        dry_run = os.getenv("COLLECTIONS_DRY_RUN", "1") == "1"
+    now = datetime.now(timezone.utc)
+    dashboard_url = os.getenv("FRONTEND_ORIGIN", "http://localhost:4000").rstrip("/") + "/account"
+
+    recaps = collect_recaps(now)
+    sent = 0
+    for r in recaps:
+        outstanding = _amount_display(r["outstanding"], r["currency"])
+        recovered = _amount_display(r["recovered_this_week"], r["currency"])
+        subject = recap_subject(r["name"])
+        if dry_run:
+            print(
+                f"[recap:dry-run] user={r['user_id']} → {r['email']} · outstanding {outstanding}"
+                f" · recovered {recovered} · {r['reminders_this_week']} reminders · {r['open_count']} open"
+            )
+            ok = True
+        else:
+            html = recap_html(
+                r["name"], outstanding, recovered, r["reminders_this_week"], r["open_count"], dashboard_url
+            )
+            ok = send_email(r["email"], subject, html)
+        if ok:
+            sent += 1
+
+    summary = {"recipients": len(recaps), "sent": sent, "dry_run": dry_run}
+    print(f"[recap] weekly recap done: {summary}")
     return summary

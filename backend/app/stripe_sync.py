@@ -83,3 +83,57 @@ def sync_invoices(user_id: int, api_key: str) -> dict:
             pass  # transient Stripe error; next sweep retries
 
     return {"synced": len(fetched), "reconciled": len(stale)}
+
+
+def audit_summary(api_key: str) -> dict:
+    """Stateless, read-only preview of an account's overdue invoices (the public lead magnet).
+
+    Reads the open invoices IN MEMORY and returns headline numbers only — it NEVER writes the
+    key or the invoices to the database. Amounts are in cents, mirroring tracked_invoices."""
+    import stripe
+
+    stripe.api_key = api_key
+    now = datetime.now(timezone.utc)
+    fetched = list(stripe.Invoice.list(status="open", limit=100).auto_paging_iter())
+
+    outstanding_amount = 0
+    overdue_amount = 0
+    overdue_count = 0
+    currency: str | None = None
+    oldest: tuple[datetime, dict] | None = None  # (due_date, summary) of the earliest overdue invoice
+
+    for inv in fetched:
+        amount = _field(inv, "amount_due") or 0
+        cur = _field(inv, "currency")
+        if currency is None and cur:
+            currency = cur
+        outstanding_amount += amount
+
+        due_ts = _field(inv, "due_date")
+        if not due_ts:
+            continue  # no due date — can't be overdue
+        due_dt = datetime.fromtimestamp(due_ts, tz=timezone.utc)
+        if due_dt >= now:
+            continue  # not past due yet
+        overdue_count += 1
+        overdue_amount += amount
+        if oldest is None or due_dt < oldest[0]:
+            oldest = (
+                due_dt,
+                {
+                    "customer_name": _field(inv, "customer_name"),
+                    "amount_due": amount,
+                    "currency": cur,
+                    "due_date": due_dt.isoformat(),
+                    "days_overdue": (now - due_dt).days,
+                },
+            )
+
+    return {
+        "outstanding_amount": outstanding_amount,
+        "outstanding_count": len(fetched),
+        "overdue_count": overdue_count,
+        "overdue_amount": overdue_amount,
+        "oldest_overdue": oldest[1] if oldest else None,
+        "currency": currency or "eur",
+    }

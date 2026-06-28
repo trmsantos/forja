@@ -1,17 +1,14 @@
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import { getDashboard, connectStripe, billingPortal, runCollections, resendVerification, type Dashboard } from "../lib/api";
+import { getDashboard, connectStripe, billingPortal, runCollections, resendVerification, startSubscription, type Dashboard, type PlanId } from "../lib/api";
+import { money } from "../lib/format";
 
-function money(amount?: number | null, currency?: string | null): string {
-  if (amount == null) return "—";
-  const cur = (currency || "eur").toUpperCase();
-  try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency: cur }).format(amount / 100);
-  } catch {
-    return `${(amount / 100).toFixed(2)} ${cur}`;
-  }
-}
+const PLANS: { id: PlanId; name: string; price: string }[] = [
+  { id: "solo", name: "Solo", price: "€19" },
+  { id: "studio", name: "Studio", price: "€49" },
+  { id: "agency", name: "Agency", price: "€99" },
+];
 
 const STATUS_STYLES: Record<string, string> = {
   open: "bg-blush text-emberlit",
@@ -47,6 +44,7 @@ export function Account() {
   const [connectErr, setConnectErr] = useState<string | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
   const [chasing, setChasing] = useState(false);
+  const [subscribing, setSubscribing] = useState<PlanId | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   function load() {
@@ -61,6 +59,15 @@ export function Account() {
   useEffect(() => {
     if (user) load();
   }, [user]);
+
+  // Feedback after returning from Stripe Checkout, then clean the URL.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sub = params.get("subscription");
+    if (sub === "success") showToast("Trial started — chasing is now switched on.");
+    else if (sub === "cancelled") showToast("Checkout cancelled. You can start the trial anytime.");
+    if (sub) window.history.replaceState({}, "", "/account");
+  }, []);
 
   async function resend() {
     setResent("sending");
@@ -102,6 +109,19 @@ export function Account() {
     window.setTimeout(() => setToast(null), 5000);
   }
 
+  async function subscribe(plan: PlanId) {
+    setSubscribing(plan);
+    try {
+      const { url, message } = await startSubscription(plan);
+      if (url) window.location.href = url;
+      else if (message) showToast(message);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Could not start your subscription.");
+    } finally {
+      setSubscribing(null);
+    }
+  }
+
   async function runChase() {
     setChasing(true);
     try {
@@ -127,6 +147,7 @@ export function Account() {
   if (!user) return <Navigate to="/login" replace />;
 
   const currency = data?.invoices[0]?.currency ?? "eur";
+  const planActive = data?.subscription_status === "active" || data?.subscription_status === "trialing";
 
   const connectForm = (compact: boolean) => (
     <form onSubmit={onConnect} className="grid gap-3">
@@ -205,13 +226,44 @@ export function Account() {
           <div className="mt-8 card p-7 shadow-soft sm:p-9">
             <h2 className="font-display text-2xl font-bold text-ink">Connect your Stripe account</h2>
             <p className="mt-3 max-w-prose text-[15px] leading-relaxed text-slate">
-              Paste a <span className="font-medium text-ink">read-only restricted key</span> with access to Invoices.
-              Forja imports your open invoices and starts chasing the ones past due. Your key is encrypted, and you can
-              disconnect anytime.
+              Forja reads your open invoices with a <span className="font-medium text-ink">read-only restricted key</span>{" "}
+              and starts chasing the ones past due. Your key is encrypted, and you can disconnect anytime.
             </p>
+
+            <ol className="mt-6 grid gap-3 max-w-prose">
+              {[
+                <>
+                  Open{" "}
+                  <a
+                    href="https://dashboard.stripe.com/apikeys/create"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-ember hover:underline"
+                  >
+                    Stripe → Create restricted key
+                  </a>{" "}
+                  (Developers → API keys).
+                </>,
+                <>
+                  Set <span className="font-medium text-ink">Invoices</span> to{" "}
+                  <span className="font-medium text-ink">Read</span>, leave everything else as None, then create the key.
+                </>,
+                <>
+                  Copy the <span className="font-mono text-ink">rk_…</span> value and paste it below.
+                </>,
+              ].map((step, i) => (
+                <li key={i} className="flex gap-3 text-[14px] leading-relaxed text-slate">
+                  <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-steel text-[12px] font-semibold text-ember">
+                    {i + 1}
+                  </span>
+                  <span>{step}</span>
+                </li>
+              ))}
+            </ol>
+
             <div className="mt-6 max-w-md">{connectForm(false)}</div>
             <p className="mt-4 text-[13px] leading-relaxed text-slate">
-              Create one in Stripe under Developers → API keys → Create restricted key, with Invoices set to Read.
+              Tip: a key in <span className="font-medium text-ink">test mode</span> lets you try Forja safely before going live.
             </p>
           </div>
         ) : (
@@ -227,7 +279,7 @@ export function Account() {
               <div className="text-[14px] text-slate">
                 Plan:{" "}
                 <span className="font-semibold capitalize text-ink">
-                  {data.subscription_status === "none" ? "Free trial" : data.subscription_status}
+                  {planActive ? data.subscription_status : "No active plan"}
                 </span>
                 {data.last_synced_at && <> · Last synced {new Date(data.last_synced_at).toLocaleString()}</>}
               </div>
@@ -238,10 +290,37 @@ export function Account() {
               )}
             </div>
 
+            {!planActive && (
+              <div className="mt-5 rounded-2xl border border-ember/40 bg-blush p-6 shadow-soft">
+                <h3 className="font-display text-lg font-bold text-ink">Switch on automatic chasing</h3>
+                <p className="mt-2 max-w-prose text-[14px] leading-relaxed text-slate">
+                  Forja is connected and watching your invoices. Start a 14-day free trial to let it send
+                  the reminders for you — no card charged today, cancel anytime.
+                </p>
+                <div className="mt-4 flex flex-wrap gap-3">
+                  {PLANS.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => subscribe(p.id)}
+                      disabled={subscribing !== null}
+                      className={`${p.id === "studio" ? "btn-ember" : "btn-ghost"} !px-5 !py-2.5 text-[14px] disabled:opacity-60`}
+                    >
+                      {subscribing === p.id ? "Starting…" : `Start trial · ${p.name} ${p.price}/mo`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="mt-5 card p-7 shadow-soft">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 className="font-display text-xl font-bold text-ink">Tracked invoices</h2>
-                <button onClick={runChase} disabled={chasing} className="btn-ember !px-4 !py-2 text-[13px] disabled:opacity-60">
+                <button
+                  onClick={runChase}
+                  disabled={chasing || !planActive}
+                  title={planActive ? undefined : "Start your free trial to chase invoices"}
+                  className="btn-ember !px-4 !py-2 text-[13px] disabled:opacity-60"
+                >
                   {chasing ? "Chasing…" : "Run chase now"}
                 </button>
               </div>

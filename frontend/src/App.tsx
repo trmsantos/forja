@@ -5,6 +5,7 @@ import { Home } from "./pages/Home";
 import { Login } from "./pages/Login";
 import { Signup } from "./pages/Signup";
 import { Account } from "./pages/Account";
+import { Audit } from "./pages/Audit";
 import { Verify } from "./pages/Verify";
 
 export default function App() {
@@ -17,6 +18,7 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/account" element={<Account />} />
+          <Route path="/audit" element={<Audit />} />
           <Route path="/verify" element={<Verify />} />
         </Routes>
       </main>
