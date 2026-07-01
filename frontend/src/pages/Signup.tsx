@@ -9,6 +9,7 @@ export function Signup() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -18,6 +19,10 @@ export function Signup() {
     e.preventDefault();
     if (password.length < 8) {
       setError("Use at least 8 characters for your password.");
+      return;
+    }
+    if (password !== confirm) {
+      setError("Those passwords don't match.");
       return;
     }
     setBusy(true);
@@ -48,7 +53,8 @@ export function Signup() {
       <form onSubmit={onSubmit} className="grid gap-4">
         <input required placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} className="field" />
         <input required type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} className="field" />
-        <input required type="password" placeholder="Password (8+ characters)" value={password} onChange={(e) => setPassword(e.target.value)} className="field" />
+        <input required type="password" autoComplete="new-password" placeholder="Password (8+ characters)" value={password} onChange={(e) => setPassword(e.target.value)} className="field" />
+        <input required type="password" autoComplete="new-password" placeholder="Confirm password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className="field" />
         <button type="submit" disabled={busy} className="btn-ember disabled:opacity-60">
           {busy ? "Creating…" : "Create account"}
         </button>
