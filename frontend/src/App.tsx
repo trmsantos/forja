@@ -9,6 +9,7 @@ import { Audit } from "./pages/Audit";
 import { Verify } from "./pages/Verify";
 import { Terms } from "./pages/Terms";
 import { Privacy } from "./pages/Privacy";
+import { LogoLab } from "./pages/LogoLab"; // temporary — logo review during redesign
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="/verify" element={<Verify />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
+          <Route path="/logo-lab" element={<LogoLab />} />
         </Routes>
       </main>
       <Footer />
