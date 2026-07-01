@@ -1,0 +1,15 @@
+{
+  "builds": [
+    { "src": "frontend/package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } },
+    { "src": "api/index.py", "use": "@vercel/python", "config": { "includeFiles": "backend/**" } }
+  ],
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/api/index.py" },
+    { "handle": "filesystem" },
+    { "src": "/(.+\\.[a-zA-Z0-9]+)", "dest": "/frontend/$1" },
+    { "src": "/(.*)", "dest": "/frontend/index.html" }
+  ],
+  "crons": [
+    { "path": "/api/cron/daily", "schedule": "0 9 * * *" }
+  ]
+}

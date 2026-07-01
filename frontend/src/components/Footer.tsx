@@ -14,9 +14,11 @@ export function Footer() {
           <a href={`mailto:${brand.email}`} className="font-medium text-ink hover:text-ember">
             {brand.email}
           </a>
-          <span className="flex gap-4">
+          <span className="flex flex-wrap gap-4 sm:justify-end">
             <Link to="/login" className="hover:text-ink">Log in</Link>
             <Link to="/signup" className="hover:text-ink">Create account</Link>
+            <Link to="/terms" className="hover:text-ink">Terms</Link>
+            <Link to="/privacy" className="hover:text-ink">Privacy</Link>
           </span>
           <span>© {new Date().getFullYear()} Forja — built by people</span>
         </div>

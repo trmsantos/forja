@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
+import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -30,6 +30,7 @@ from dotenv import load_dotenv
 # imports would leave them snapshotting unset values / defaults.
 load_dotenv()
 
+import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -75,6 +76,9 @@ TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "14"))
 # A plan in one of these states may use the collections engine; everything else is paywalled.
 ACTIVE_PLAN_STATUSES = {"active", "trialing"}
 
+# Vercel Cron auth: the scheduled GET /api/cron/daily must carry "Authorization: Bearer $CRON_SECRET".
+CRON_SECRET = os.getenv("CRON_SECRET")
+
 app = FastAPI(title="Forja API", version="0.3.0")
 
 app.add_middleware(
@@ -87,40 +91,25 @@ app.add_middleware(
 bearer = HTTPBearer(auto_error=True)
 
 
+_db_initialized = False
+
+
 @app.on_event("startup")
 def _startup() -> None:
-    init_db()
-    _maybe_start_scheduler()
+    """Create tables on the first cold start, guarded so it runs once per process and never
+    crashes the app: a serverless function must still boot if DATABASE_URL is briefly unset or
+    the DB is unreachable (canonical creation is `python backend/scripts/init_db.py`).
 
-
-def _maybe_start_scheduler() -> None:
-    """Start the daily Collections sweep — only when COLLECTIONS_ENABLED=1, so the engine
-    never emails real debtors by accident on a fresh boot."""
-    if os.getenv("COLLECTIONS_ENABLED", "0") != "1":
-        print("[collections] scheduler disabled (set COLLECTIONS_ENABLED=1 for daily sweeps)")
+    There is no in-process scheduler on serverless — the daily sweep and weekly recap run via
+    Vercel Cron hitting /api/cron/daily."""
+    global _db_initialized
+    if _db_initialized:
         return
-    from apscheduler.schedulers.background import BackgroundScheduler
-    from apscheduler.triggers.cron import CronTrigger
-
-    from .collections_agent import run_sweep, run_weekly_recap
-
-    hour = int(os.getenv("COLLECTIONS_HOUR", "9"))
-    scheduler = BackgroundScheduler(timezone="UTC")
-    scheduler.add_job(run_sweep, CronTrigger(hour=hour, minute=0), id="collections_sweep", replace_existing=True)
-
-    # Weekly retention recap to subscribed customers (defaults: Monday 08:00 UTC).
-    recap_day = os.getenv("RECAP_DAY", "mon")
-    recap_hour = int(os.getenv("RECAP_HOUR", "8"))
-    scheduler.add_job(
-        run_weekly_recap,
-        CronTrigger(day_of_week=recap_day, hour=recap_hour, minute=0),
-        id="weekly_recap",
-        replace_existing=True,
-    )
-
-    scheduler.start()
-    print(f"[collections] scheduler started — daily sweep at {hour:02d}:00 UTC")
-    print(f"[recap] weekly recap scheduled — {recap_day} {recap_hour:02d}:00 UTC")
+    try:
+        init_db()
+        _db_initialized = True
+    except Exception as exc:
+        print("[startup] init_db skipped:", exc)
 
 
 # ---------- models ----------
@@ -168,7 +157,7 @@ class AuditIn(BaseModel):
 
 
 # ---------- helpers ----------
-def _user_dict(row: sqlite3.Row) -> dict:
+def _user_dict(row: dict) -> dict:
     return {
         "id": row["id"],
         "name": row["name"],
@@ -188,7 +177,7 @@ def _plan_is_active(user_id: int) -> bool:
     (active or trialing). This is the paywall: chasing is gated on it."""
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT subscription_status FROM users WHERE id = ?", (user_id,)
+            "SELECT subscription_status FROM users WHERE id = %s", (user_id,)
         ).fetchone()
     return bool(row) and row["subscription_status"] in ACTIVE_PLAN_STATUSES
 
@@ -200,7 +189,7 @@ def current_user(creds: HTTPAuthorizationCredentials = Depends(bearer)) -> dict:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT id, name, email, email_verified FROM users WHERE id = ?", (user_id,)
+            "SELECT id, name, email, email_verified FROM users WHERE id = %s", (user_id,)
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=401, detail="User not found")
@@ -218,12 +207,13 @@ def register(body: RegisterIn) -> dict:
     now = datetime.now(timezone.utc).isoformat()
     try:
         with get_conn() as conn:
-            cur = conn.execute(
-                "INSERT INTO users (name, email, password_hash, email_verified, created_at) VALUES (?, ?, ?, 0, ?)",
+            row = conn.execute(
+                "INSERT INTO users (name, email, password_hash, email_verified, created_at) "
+                "VALUES (%s, %s, %s, 0, %s) RETURNING id",
                 (body.name, body.email.lower(), hash_password(body.password), now),
-            )
-            user_id = cur.lastrowid
-    except sqlite3.IntegrityError:
+            ).fetchone()
+            user_id = row["id"]
+    except psycopg.errors.UniqueViolation:
         raise HTTPException(status_code=409, detail="An account with this email already exists")
 
     _send_verification(user_id, body.name, body.email.lower())
@@ -237,7 +227,7 @@ def register(body: RegisterIn) -> dict:
 def login(body: LoginIn) -> dict:
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT id, name, email, email_verified, password_hash FROM users WHERE email = ?",
+            "SELECT id, name, email, email_verified, password_hash FROM users WHERE email = %s",
             (body.email.lower(),),
         ).fetchone()
     if row is None or not verify_password(body.password, row["password_hash"]):
@@ -257,9 +247,9 @@ def verify_email(body: VerifyIn) -> dict:
     except Exception:
         raise HTTPException(status_code=400, detail="This confirmation link is invalid or has expired")
     with get_conn() as conn:
-        conn.execute("UPDATE users SET email_verified = 1 WHERE id = ?", (user_id,))
+        conn.execute("UPDATE users SET email_verified = 1 WHERE id = %s", (user_id,))
         row = conn.execute(
-            "SELECT id, name, email, email_verified FROM users WHERE id = ?", (user_id,)
+            "SELECT id, name, email, email_verified FROM users WHERE id = %s", (user_id,)
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -278,7 +268,7 @@ def resend_verification(user: dict = Depends(current_user)) -> dict:
 def account_requests(user: dict = Depends(current_user)) -> list:
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT service, message, at FROM leads WHERE email = ? ORDER BY at DESC",
+            "SELECT service, message, at FROM leads WHERE email = %s ORDER BY at DESC",
             (user["email"],),
         ).fetchall()
     return [{"service": r["service"], "message": r["message"], "at": r["at"]} for r in rows]
@@ -289,7 +279,7 @@ def create_lead(lead: Lead) -> dict:
     now = datetime.now(timezone.utc).isoformat()
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO leads (name, email, company, service, message, at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO leads (name, email, company, service, message, at) VALUES (%s, %s, %s, %s, %s, %s)",
             (lead.name, lead.email.lower(), lead.company, lead.service, lead.message, now),
         )
     send_email(
@@ -330,7 +320,7 @@ def audit(body: AuditIn) -> dict:
             )
             with get_conn() as conn:
                 conn.execute(
-                    "INSERT INTO leads (name, email, company, service, message, at) VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO leads (name, email, company, service, message, at) VALUES (%s, %s, %s, %s, %s, %s)",
                     ("Audit lead", body.email.lower(), None, "audit", note, now),
                 )
             send_email(
@@ -371,7 +361,7 @@ def checkout(req: CheckoutRequest) -> dict:
 def account_payments(user: dict = Depends(current_user)) -> list:
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT description, amount, currency, status, at FROM payments WHERE email = ? ORDER BY at DESC",
+            "SELECT description, amount, currency, status, at FROM payments WHERE email = %s ORDER BY at DESC",
             (user["email"],),
         ).fetchall()
     return [
@@ -407,8 +397,8 @@ def connect_stripe(body: ConnectStripeIn, user: dict = Depends(current_user)) ->
         conn.execute(
             """
             INSERT INTO connections (user_id, stripe_account_id, encrypted_key, status, last_synced_at, created_at)
-            VALUES (?, ?, ?, 'active', ?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
+            VALUES (%s, %s, %s, 'active', %s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET
                 stripe_account_id = excluded.stripe_account_id,
                 encrypted_key = excluded.encrypted_key,
                 status = 'active',
@@ -426,28 +416,28 @@ def dashboard(user: dict = Depends(current_user)) -> dict:
     """Everything the account view needs: connection state, money totals, invoices."""
     with get_conn() as conn:
         conn_row = conn.execute(
-            "SELECT stripe_account_id, status, last_synced_at FROM connections WHERE user_id = ?",
+            "SELECT stripe_account_id, status, last_synced_at FROM connections WHERE user_id = %s",
             (user["id"],),
         ).fetchone()
         sub_row = conn.execute(
-            "SELECT subscription_status, trial_ends_at FROM users WHERE id = ?", (user["id"],)
+            "SELECT subscription_status, trial_ends_at FROM users WHERE id = %s", (user["id"],)
         ).fetchone()
         open_row = conn.execute(
             "SELECT COUNT(*) AS c, COALESCE(SUM(amount_due), 0) AS s "
-            "FROM tracked_invoices WHERE user_id = ? AND status = 'open'",
+            "FROM tracked_invoices WHERE user_id = %s AND status = 'open'",
             (user["id"],),
         ).fetchone()
         recovered = conn.execute(
-            "SELECT COALESCE(SUM(amount_due), 0) AS s FROM tracked_invoices WHERE user_id = ? AND status = 'paid'",
+            "SELECT COALESCE(SUM(amount_due), 0) AS s FROM tracked_invoices WHERE user_id = %s AND status = 'paid'",
             (user["id"],),
         ).fetchone()["s"]
         reminders = conn.execute(
-            "SELECT COUNT(*) AS c FROM reminders_sent WHERE user_id = ?", (user["id"],)
+            "SELECT COUNT(*) AS c FROM reminders_sent WHERE user_id = %s", (user["id"],)
         ).fetchone()["c"]
         invoices = conn.execute(
             "SELECT stripe_invoice_id, customer_name, customer_email, amount_due, currency, "
             "due_date, hosted_invoice_url, status, reminder_step, last_reminder_at "
-            "FROM tracked_invoices WHERE user_id = ? ORDER BY due_date IS NULL, due_date ASC",
+            "FROM tracked_invoices WHERE user_id = %s ORDER BY due_date IS NULL, due_date ASC",
             (user["id"],),
         ).fetchall()
 
@@ -517,7 +507,7 @@ def billing_portal(user: dict = Depends(current_user)) -> dict:
         raise HTTPException(status_code=400, detail="Billing isn't configured yet.")
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT stripe_customer_id FROM users WHERE id = ?", (user["id"],)
+            "SELECT stripe_customer_id FROM users WHERE id = %s", (user["id"],)
         ).fetchone()
     customer_id = row["stripe_customer_id"] if row else None
     if not customer_id:
@@ -546,6 +536,25 @@ def collections_run(user: dict = Depends(current_user)) -> dict:
     return run_sweep(user_id=user["id"])
 
 
+@app.get("/api/cron/daily")
+def cron_daily(request: Request) -> dict:
+    """Vercel Cron entrypoint (fires once daily). Protected by CRON_SECRET — Vercel sends
+    'Authorization: Bearer $CRON_SECRET'. Runs the collections sweep every day, and the weekly
+    recap when today's weekday matches RECAP_DAY. One endpoint stays within Hobby's
+    once-per-day / cron-count limits. Both respect COLLECTIONS_DRY_RUN."""
+    auth = request.headers.get("Authorization", "")
+    if not CRON_SECRET or not secrets.compare_digest(auth, f"Bearer {CRON_SECRET}"):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    from .collections_agent import run_sweep, run_weekly_recap
+
+    result: dict = {"swept": run_sweep()}
+    today = datetime.now(timezone.utc).strftime("%a").lower()  # mon, tue, ...
+    if today == os.getenv("RECAP_DAY", "mon").lower():
+        result["recap"] = run_weekly_recap()
+    return result
+
+
 def _set_subscription(
     customer_id: Optional[str], status: Optional[str], trial_iso: Optional[str], email: Optional[str] = None
 ) -> None:
@@ -555,14 +564,14 @@ def _set_subscription(
         return
     with get_conn() as conn:
         cur = conn.execute(
-            "UPDATE users SET subscription_status = ?, trial_ends_at = ?, stripe_customer_id = ? "
-            "WHERE stripe_customer_id = ?",
+            "UPDATE users SET subscription_status = %s, trial_ends_at = %s, stripe_customer_id = %s "
+            "WHERE stripe_customer_id = %s",
             (status, trial_iso, customer_id, customer_id),
         )
         if cur.rowcount == 0 and email:
             conn.execute(
-                "UPDATE users SET subscription_status = ?, trial_ends_at = ?, stripe_customer_id = ? "
-                "WHERE email = ?",
+                "UPDATE users SET subscription_status = %s, trial_ends_at = %s, stripe_customer_id = %s "
+                "WHERE email = %s",
                 (status, trial_iso, customer_id, email.lower()),
             )
 
@@ -572,8 +581,8 @@ def _record_payment(email: str, description: str, amount: Optional[int], currenc
     now = datetime.now(timezone.utc).isoformat()
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT OR IGNORE INTO payments (email, description, amount, currency, status, stripe_id, at) "
-            "VALUES (?, ?, ?, ?, 'paid', ?, ?)",
+            "INSERT INTO payments (email, description, amount, currency, status, stripe_id, at) "
+            "VALUES (%s, %s, %s, %s, 'paid', %s, %s) ON CONFLICT (stripe_id) DO NOTHING",
             (email.lower(), description, amount, currency, stripe_id, now),
         )
         inserted = cur.rowcount > 0
@@ -631,12 +640,12 @@ async def stripe_webhook(request: Request) -> dict:
                 try:
                     with get_conn() as conn:
                         conn.execute(
-                            "UPDATE users SET stripe_customer_id = ?, subscription_status = 'trialing' "
-                            "WHERE id = ?",
+                            "UPDATE users SET stripe_customer_id = %s, subscription_status = 'trialing' "
+                            "WHERE id = %s",
                             (customer_id, int(ref)),
                         )
                     linked = True
-                except (ValueError, sqlite3.Error):
+                except (ValueError, psycopg.Error):
                     linked = False
             if not linked and email:
                 _set_subscription(customer_id, "trialing", None, email=email)

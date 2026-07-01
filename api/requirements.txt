@@ -1,0 +1,11 @@
+# Installed by @vercel/python for the serverless function (api/index.py).
+# Mirror of backend/requirements.txt (minus uvicorn — the serverless runtime serves the ASGI app).
+fastapi>=0.115,<1.0
+pydantic[email]>=2.11
+python-dotenv>=1.0.1
+stripe>=11.0
+bcrypt>=4.1
+PyJWT>=2.9
+cryptography>=43.0
+psycopg[binary]>=3.2
+certifi>=2024.2.2

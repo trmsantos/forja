@@ -1,0 +1,106 @@
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# paths-filter reads the PR's changed files via the API; needs pull-requests: read.
+permissions:
+  contents: read
+  pull-requests: read
+
+# Cancel superseded runs on the same branch/PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---- Quality gate (blocks merge via branch protection) ----
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: forja_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # Throwaway CI database — never touches Neon.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/forja_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Run test suite
+        working-directory: backend
+        run: python test_collections_agent.py
+
+  frontend:
+    name: Frontend typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Build
+        run: npm run build
+
+  # ---- Deploy (only after the gate passes, and only for build-worthy changes) ----
+  deploy:
+    name: Deploy to Vercel
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            build:
+              - 'frontend/**'
+              - 'backend/**'
+              - 'api/**'
+              - 'requirements.txt'
+              - 'vercel.json'
+      - name: Install Vercel CLI
+        if: steps.filter.outputs.build == 'true'
+        run: npm i -g vercel@latest
+      - name: Deploy preview (PR)
+        if: steps.filter.outputs.build == 'true' && github.event_name == 'pull_request'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: vercel deploy --token="$VERCEL_TOKEN" --yes
+      - name: Deploy production (merge to main)
+        if: steps.filter.outputs.build == 'true' && github.event_name == 'push'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: vercel deploy --prod --token="$VERCEL_TOKEN" --yes
+      - name: No deploy needed
+        if: steps.filter.outputs.build != 'true'
+        run: echo "No build-worthy changes (frontend/backend/api/requirements.txt/vercel.json) — skipping deploy."

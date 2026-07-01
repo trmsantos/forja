@@ -87,11 +87,11 @@ def send_reminder(conn, user_row, inv_row, step: int, now: datetime, dry_run: bo
         iso = now.isoformat()
         conn.execute(
             "INSERT INTO reminders_sent (invoice_id, user_id, step, channel, to_email, subject, sent_at) "
-            "VALUES (?, ?, ?, 'email', ?, ?, ?)",
+            "VALUES (%s, %s, %s, 'email', %s, %s, %s)",
             (inv_row["id"], user_row["id"], step, debtor_email, subject, iso),
         )
         conn.execute(
-            "UPDATE tracked_invoices SET reminder_step = ?, last_reminder_at = ?, updated_at = ? WHERE id = ?",
+            "UPDATE tracked_invoices SET reminder_step = %s, last_reminder_at = %s, updated_at = %s WHERE id = %s",
             (step, iso, iso, inv_row["id"]),
         )
     return sent
@@ -118,7 +118,7 @@ def run_sweep(user_id: Optional[int] = None, dry_run: Optional[bool] = None) -> 
         )
         params: tuple = ()
         if user_id is not None:
-            query += " AND c.user_id = ?"
+            query += " AND c.user_id = %s"
             params = (user_id,)
         conns = [(r["user_id"], r["encrypted_key"]) for r in conn.execute(query, params).fetchall()]
 
@@ -139,11 +139,11 @@ def run_sweep(user_id: Optional[int] = None, dry_run: Optional[bool] = None) -> 
             continue  # skip sending on stale data
         # 2) decide + send for this user's still-open invoices
         with get_conn() as conn:
-            user_row = conn.execute("SELECT id, name, email FROM users WHERE id = ?", (uid,)).fetchone()
+            user_row = conn.execute("SELECT id, name, email FROM users WHERE id = %s", (uid,)).fetchone()
             if user_row is None:
                 continue
             invoices = conn.execute(
-                "SELECT * FROM tracked_invoices WHERE user_id = ? AND status = 'open'", (uid,)
+                "SELECT * FROM tracked_invoices WHERE user_id = %s AND status = 'open'", (uid,)
             ).fetchall()
             for inv in invoices:
                 step = next_reminder_step(dict(inv), now)
@@ -169,26 +169,26 @@ def collect_recaps(now: datetime) -> list:
         for u in users:
             outstanding = conn.execute(
                 "SELECT COALESCE(SUM(amount_due), 0) AS s FROM tracked_invoices "
-                "WHERE user_id = ? AND status = 'open'",
+                "WHERE user_id = %s AND status = 'open'",
                 (u["id"],),
             ).fetchone()["s"]
             open_count = conn.execute(
-                "SELECT COUNT(*) AS c FROM tracked_invoices WHERE user_id = ? AND status = 'open'",
+                "SELECT COUNT(*) AS c FROM tracked_invoices WHERE user_id = %s AND status = 'open'",
                 (u["id"],),
             ).fetchone()["c"]
             # Recovered "this week" = invoices that flipped to paid in the window (updated_at is
             # bumped by the re-sync reconciliation when Stripe marks them paid).
             recovered = conn.execute(
                 "SELECT COALESCE(SUM(amount_due), 0) AS s FROM tracked_invoices "
-                "WHERE user_id = ? AND status = 'paid' AND updated_at >= ?",
+                "WHERE user_id = %s AND status = 'paid' AND updated_at >= %s",
                 (u["id"], week_ago),
             ).fetchone()["s"]
             reminders = conn.execute(
-                "SELECT COUNT(*) AS c FROM reminders_sent WHERE user_id = ? AND sent_at >= ?",
+                "SELECT COUNT(*) AS c FROM reminders_sent WHERE user_id = %s AND sent_at >= %s",
                 (u["id"], week_ago),
             ).fetchone()["c"]
             cur_row = conn.execute(
-                "SELECT currency FROM tracked_invoices WHERE user_id = ? AND currency IS NOT NULL LIMIT 1",
+                "SELECT currency FROM tracked_invoices WHERE user_id = %s AND currency IS NOT NULL LIMIT 1",
                 (u["id"],),
             ).fetchone()
             recaps.append(

@@ -1,0 +1,33 @@
+# Forja backend on Fly.io.
+# `fly launch --no-deploy` will overwrite `app` with the name you pick; then create the volume:
+#   fly volumes create forja_data --size 1
+# Set secrets (never put them here): JWT_SECRET, ENCRYPTION_KEY, STRIPE_SECRET_KEY,
+#   STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_SOLO/STUDIO/AGENCY, RESEND_API_KEY, EMAIL_FROM.
+
+app = "forja-api"          # <-- change to your unique Fly app name
+primary_region = "mad"     # Madrid — closest to Portugal. Change if you prefer.
+
+[build]
+
+[env]
+  PORT = "8080"
+  DB_PATH = "/data/forja.db"        # SQLite on the persistent volume below
+  FRONTEND_ORIGIN = "https://YOUR-APP.vercel.app"  # <-- your Vercel URL (CORS + email links)
+  COLLECTIONS_ENABLED = "1"         # run the daily sweep + weekly recap
+  COLLECTIONS_DRY_RUN = "1"         # keep logging-only until you trust it, then set "0"
+
+[mounts]
+  source = "forja_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # The background scheduler must keep running, so don't auto-stop the machine.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
