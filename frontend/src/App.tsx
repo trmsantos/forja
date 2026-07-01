@@ -1,6 +1,7 @@
 import { Routes, Route } from "react-router-dom";
 import { Nav } from "./components/Nav";
 import { Footer } from "./components/Footer";
+import { CookieNotice } from "./components/CookieNotice";
 import { Home } from "./pages/Home";
 import { Login } from "./pages/Login";
 import { Signup } from "./pages/Signup";
@@ -27,6 +28,7 @@ export default function App() {
         </Routes>
       </main>
       <Footer />
+      <CookieNotice />
     </div>
   );
 }
