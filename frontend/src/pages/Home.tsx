@@ -11,6 +11,7 @@ import { Security } from "../components/Security";
 import { Pricing } from "../components/Pricing";
 import { Faq } from "../components/Faq";
 import { Contact } from "../components/Contact";
+import { FinalCta } from "../components/FinalCta";
 
 export function Home() {
   const { hash } = useLocation();
@@ -34,6 +35,7 @@ export function Home() {
       <Pricing />
       <Faq />
       <Contact />
+      <FinalCta />
     </div>
   );
 }
