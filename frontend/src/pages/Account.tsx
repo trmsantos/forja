@@ -268,11 +268,20 @@ export function Account() {
           </div>
         ) : (
           <>
-            <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <Stat label="Outstanding" value={money(data.totals.outstanding_amount, currency)} />
-              <Stat label="Recovered" value={money(data.totals.recovered_amount, currency)} accent />
-              <Stat label="Open invoices" value={String(data.totals.open_count)} />
-              <Stat label="Reminders sent" value={String(data.totals.reminders_sent)} />
+            <div className="mt-8 grid gap-4 lg:grid-cols-3">
+              {/* Recovered is the whole point of Forja — make it the hero metric, not one of four equals. */}
+              <div className="card flex flex-col justify-center p-7 shadow-soft">
+                <p className="text-[13px] font-semibold uppercase tracking-wide text-slate">Recovered</p>
+                <p className="mt-2 font-mono text-[40px] font-semibold leading-none tabular-nums text-ember">
+                  {money(data.totals.recovered_amount, currency)}
+                </p>
+                <p className="mt-2 text-[13px] text-slate">collected since you connected</p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-3 lg:col-span-2">
+                <Stat label="Outstanding" value={money(data.totals.outstanding_amount, currency)} />
+                <Stat label="Open invoices" value={String(data.totals.open_count)} />
+                <Stat label="Reminders sent" value={String(data.totals.reminders_sent)} />
+              </div>
             </div>
 
             <div className="mt-5 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-line bg-paper p-5">
