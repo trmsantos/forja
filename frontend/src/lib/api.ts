@@ -2,7 +2,14 @@
 
 const TOKEN_KEY = "forja_token";
 
-export type User = { id: number; name: string; email: string; email_verified: boolean };
+export type User = {
+  id: number;
+  name: string;
+  email: string;
+  email_verified: boolean;
+  display_name?: string | null;
+  avatar_url?: string | null;
+};
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -190,6 +197,48 @@ export async function connectStripe(apiKey: string): Promise<ConnectResult> {
   });
   if (!res.ok) throw new Error(await detail(res, "Could not connect your Stripe account"));
   return (await res.json()) as ConnectResult;
+}
+
+// ----- Profile & account settings -----
+export async function updateProfile(name: string, displayName: string): Promise<User> {
+  const res = await fetch("/api/account/profile", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ name, display_name: displayName || null }),
+  });
+  if (!res.ok) throw new Error(await detail(res, "Could not save your profile"));
+  return (await res.json()) as User;
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const res = await fetch("/api/account/password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+  if (!res.ok) throw new Error(await detail(res, "Could not change your password"));
+}
+
+// Avatar is sent as the raw file body (Content-Type = the image type); the backend reads it
+// directly, so no multipart/form-data is needed.
+export async function uploadAvatar(file: File): Promise<{ avatar_url: string }> {
+  const res = await fetch("/api/account/avatar", {
+    method: "POST",
+    headers: { "Content-Type": file.type, ...authHeaders() },
+    body: file,
+  });
+  if (!res.ok) throw new Error(await detail(res, "Could not upload your photo"));
+  return (await res.json()) as { avatar_url: string };
+}
+
+export async function removeAvatar(): Promise<void> {
+  const res = await fetch("/api/account/avatar", { method: "DELETE", headers: { ...authHeaders() } });
+  if (!res.ok) throw new Error(await detail(res, "Could not remove your photo"));
+}
+
+export async function disconnectStripe(): Promise<void> {
+  const res = await fetch("/api/connect/disconnect", { method: "POST", headers: { ...authHeaders() } });
+  if (!res.ok) throw new Error(await detail(res, "Could not disconnect Stripe"));
 }
 
 export async function billingPortal(): Promise<{ url: string }> {
