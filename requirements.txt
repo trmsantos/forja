@@ -1,0 +1,13 @@
+# Dependencies for the Vercel Python serverless function (api/index.py).
+# Vercel's Python builder does NOT support pip "-r" includes, so this lists the packages
+# directly. Keep it in sync with backend/requirements.txt (minus uvicorn, which the serverless
+# runtime doesn't need — Vercel serves the ASGI app itself).
+fastapi>=0.115,<1.0
+pydantic[email]>=2.11
+python-dotenv>=1.0.1
+stripe>=11.0
+bcrypt>=4.1
+PyJWT>=2.9
+cryptography>=43.0
+psycopg[binary]>=3.2
+certifi>=2024.2.2

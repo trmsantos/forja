@@ -1,0 +1,10 @@
+.venv
+__pycache__
+*.pyc
+.env
+.env.*
+forja.db
+leads.jsonl
+.impeccable
+setup-stripe.sh
+test_collections_agent.py

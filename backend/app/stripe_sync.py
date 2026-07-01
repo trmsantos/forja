@@ -5,7 +5,7 @@ so the upsert + paid/void reconciliation logic lives in exactly one place."""
 
 from __future__ import annotations
 
-import sqlite3
+import psycopg
 from datetime import datetime, timezone
 
 from .db import get_conn
@@ -21,7 +21,7 @@ def _field(obj, key, default=None):
         return default
 
 
-def upsert_invoice(conn: sqlite3.Connection, user_id: int, inv, now: str) -> None:
+def upsert_invoice(conn: psycopg.Connection, user_id: int, inv, now: str) -> None:
     """Insert or refresh one tracked invoice. Idempotent on (user_id, stripe id)."""
     due = _field(inv, "due_date")
     due_iso = datetime.fromtimestamp(due, tz=timezone.utc).isoformat() if due else None
@@ -30,8 +30,8 @@ def upsert_invoice(conn: sqlite3.Connection, user_id: int, inv, now: str) -> Non
         INSERT INTO tracked_invoices
             (user_id, stripe_invoice_id, customer_name, customer_email, amount_due,
              currency, due_date, hosted_invoice_url, status, reminder_step, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', 0, ?, ?)
-        ON CONFLICT(user_id, stripe_invoice_id) DO UPDATE SET
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'open', 0, %s, %s)
+        ON CONFLICT (user_id, stripe_invoice_id) DO UPDATE SET
             customer_name = excluded.customer_name,
             customer_email = excluded.customer_email,
             amount_due = excluded.amount_due,
@@ -65,10 +65,10 @@ def sync_invoices(user_id: int, api_key: str) -> dict:
         for inv in fetched:
             upsert_invoice(conn, user_id, inv, now)
         previously_open = conn.execute(
-            "SELECT id, stripe_invoice_id FROM tracked_invoices WHERE user_id = ? AND status = 'open'",
+            "SELECT id, stripe_invoice_id FROM tracked_invoices WHERE user_id = %s AND status = 'open'",
             (user_id,),
         ).fetchall()
-        conn.execute("UPDATE connections SET last_synced_at = ? WHERE user_id = ?", (now, user_id))
+        conn.execute("UPDATE connections SET last_synced_at = %s WHERE user_id = %s", (now, user_id))
 
     stale = [r for r in previously_open if r["stripe_invoice_id"] not in open_ids]
     for r in stale:
@@ -76,7 +76,7 @@ def sync_invoices(user_id: int, api_key: str) -> dict:
             inv = stripe.Invoice.retrieve(r["stripe_invoice_id"])
             with get_conn() as conn:
                 conn.execute(
-                    "UPDATE tracked_invoices SET status = ?, updated_at = ? WHERE id = ?",
+                    "UPDATE tracked_invoices SET status = %s, updated_at = %s WHERE id = %s",
                     (_field(inv, "status"), now, r["id"]),
                 )
         except Exception:

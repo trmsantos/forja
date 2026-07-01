@@ -1,11 +1,16 @@
 """Self-contained tests for the Collections Agent.
 
 Run from backend/ with the venv active:  python test_collections_agent.py
-Seeds a throwaway user in forja.db, stubs the Stripe sync, asserts behavior, cleans up.
+Runs against Postgres via DATABASE_URL (loaded from backend/.env). Seeds throwaway users,
+stubs the Stripe sync, asserts behavior, then cleans up.
 """
 
 import sys
 from datetime import datetime, timedelta, timezone
+
+from dotenv import load_dotenv
+
+load_dotenv()  # load DATABASE_URL (and friends) from backend/.env before app.db reads it at import
 
 sys.path.insert(0, ".")
 from app.db import init_db, get_conn  # noqa: E402
@@ -17,6 +22,15 @@ NOW = datetime(2026, 6, 26, 12, 0, tzinfo=timezone.utc)
 
 def iso(dt):
     return dt.isoformat()
+
+
+def _new_user(c, name, email):
+    """Insert a throwaway verified user, returning its id (Postgres RETURNING, not lastrowid)."""
+    return c.execute(
+        "INSERT INTO users (name, email, password_hash, email_verified, created_at) "
+        "VALUES (%s, %s, 'x', 1, %s) RETURNING id",
+        (name, email, iso(NOW)),
+    ).fetchone()["id"]
 
 
 # ---- 1) pure decision logic (no DB, no Stripe) ----
@@ -47,15 +61,12 @@ print("email escaping: PASS")
 init_db()
 EMAIL = "collections_test@forja.studio"
 with get_conn() as c:
-    c.execute("DELETE FROM users WHERE email = ?", (EMAIL,))  # clean slate (cascades)
-    uid = c.execute(
-        "INSERT INTO users (name, email, password_hash, email_verified, created_at) VALUES (?,?,?,1,?)",
-        ("Test Studio", EMAIL, "x", iso(NOW)),
-    ).lastrowid
+    c.execute("DELETE FROM users WHERE email = %s", (EMAIL,))  # clean slate (cascades)
+    uid = _new_user(c, "Test Studio", EMAIL)
     # The collections engine is paywalled — the sweep only touches subscribed users.
-    c.execute("UPDATE users SET subscription_status = 'active' WHERE id = ?", (uid,))
+    c.execute("UPDATE users SET subscription_status = 'active' WHERE id = %s", (uid,))
     c.execute(
-        "INSERT INTO connections (user_id, encrypted_key, status, created_at) VALUES (?,?,?,?)",
+        "INSERT INTO connections (user_id, encrypted_key, status, created_at) VALUES (%s, %s, %s, %s)",
         (uid, encrypt_secret("rk_test"), "active", iso(NOW)),
     )
 
@@ -66,7 +77,7 @@ with get_conn() as c:
         c.execute(
             "INSERT INTO tracked_invoices (user_id, stripe_invoice_id, customer_name, customer_email, amount_due, "
             "currency, due_date, hosted_invoice_url, status, reminder_step, last_reminder_at, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (uid, sid, "Acme", d["customer_email"], 50000, "eur", d["due_date"], "https://pay/" + sid,
              d["status"], d["reminder_step"], d["last_reminder_at"], iso(NOW), iso(NOW)),
         )
@@ -89,12 +100,12 @@ assert summary["skipped"] == 4, f"expected 4 skipped, got {summary['skipped']}"
 
 with get_conn() as c:
     def step(sid):
-        return c.execute("SELECT reminder_step FROM tracked_invoices WHERE user_id=? AND stripe_invoice_id=?", (uid, sid)).fetchone()["reminder_step"]
+        return c.execute("SELECT reminder_step FROM tracked_invoices WHERE user_id=%s AND stripe_invoice_id=%s", (uid, sid)).fetchone()["reminder_step"]
     assert step("a_due") == 1, step("a_due")
     assert step("c_step2") == 2, step("c_step2")
     assert step("b_gap") == 1, "b_gap unchanged"
     assert step("g_maxed") == 3, "g_maxed unchanged"
-    n = c.execute("SELECT COUNT(*) AS n FROM reminders_sent WHERE user_id=?", (uid,)).fetchone()["n"]
+    n = c.execute("SELECT COUNT(*) AS n FROM reminders_sent WHERE user_id=%s", (uid,)).fetchone()["n"]
     assert n == 2, n
 print("run_sweep: PASS")
 
@@ -149,7 +160,7 @@ with get_conn() as c:
     upsert_invoice(c, uid, _inv, iso(NOW))  # must NOT raise "AttributeError: get"
     r = c.execute(
         "SELECT customer_name, customer_email, amount_due, currency, due_date, hosted_invoice_url "
-        "FROM tracked_invoices WHERE user_id=? AND stripe_invoice_id='regress_field'", (uid,),
+        "FROM tracked_invoices WHERE user_id=%s AND stripe_invoice_id='regress_field'", (uid,),
     ).fetchone()
 assert r is not None, "upsert_invoice must insert the synced row"
 assert r["amount_due"] == 12345 and r["currency"] == "eur", dict(r)
@@ -160,20 +171,17 @@ print("stripe field access (v15 regression): PASS")
 # ---- 5) paywall: a user without an active/trialing subscription is never swept ----
 UNSUB_EMAIL = "collections_unsub@forja.studio"
 with get_conn() as c:
-    c.execute("DELETE FROM users WHERE email = ?", (UNSUB_EMAIL,))
-    unsub_uid = c.execute(
-        "INSERT INTO users (name, email, password_hash, email_verified, created_at) VALUES (?,?,?,1,?)",
-        ("No Plan", UNSUB_EMAIL, "x", iso(NOW)),
-    ).lastrowid
+    c.execute("DELETE FROM users WHERE email = %s", (UNSUB_EMAIL,))
+    unsub_uid = _new_user(c, "No Plan", UNSUB_EMAIL)
     # subscription_status stays at its 'none' default — i.e. not paying.
     c.execute(
-        "INSERT INTO connections (user_id, encrypted_key, status, created_at) VALUES (?,?,?,?)",
+        "INSERT INTO connections (user_id, encrypted_key, status, created_at) VALUES (%s, %s, %s, %s)",
         (unsub_uid, encrypt_secret("rk_test"), "active", iso(NOW)),
     )
     c.execute(
         "INSERT INTO tracked_invoices (user_id, stripe_invoice_id, customer_name, customer_email, amount_due, "
         "currency, due_date, hosted_invoice_url, status, reminder_step, last_reminder_at, created_at, updated_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
         (unsub_uid, "unsub_overdue", "Acme", "ap@acme.test", 50000, "eur",
          iso(NOW - timedelta(days=10)), "https://pay/unsub", "open", 0, None, iso(NOW), iso(NOW)),
     )
@@ -182,7 +190,7 @@ unsub_summary = ca.run_sweep(user_id=unsub_uid, dry_run=True)
 assert unsub_summary["connections"] == 0, f"unsubscribed user must be skipped, got {unsub_summary}"
 assert unsub_summary["reminders"] == 0, unsub_summary
 with get_conn() as c:
-    c.execute("DELETE FROM users WHERE id = ?", (unsub_uid,))
+    c.execute("DELETE FROM users WHERE id = %s", (unsub_uid,))
 print("paywall gating: PASS")
 
 # ---- 6) weekly recap: selects only subscribed users, with correct weekly totals (no network) ----
@@ -190,22 +198,16 @@ RECAP_SUB = "recap_subbed@forja.studio"
 RECAP_FREE = "recap_free@forja.studio"
 with get_conn() as c:
     for em in (RECAP_SUB, RECAP_FREE):
-        c.execute("DELETE FROM users WHERE email = ?", (em,))
-    sub_id = c.execute(
-        "INSERT INTO users (name, email, password_hash, email_verified, created_at) VALUES (?,?,?,1,?)",
-        ("Sub Studio", RECAP_SUB, "x", iso(NOW)),
-    ).lastrowid
-    c.execute("UPDATE users SET subscription_status = 'active' WHERE id = ?", (sub_id,))
-    free_id = c.execute(
-        "INSERT INTO users (name, email, password_hash, email_verified, created_at) VALUES (?,?,?,1,?)",
-        ("Free Studio", RECAP_FREE, "x", iso(NOW)),
-    ).lastrowid  # stays subscription_status='none' — must be excluded from recaps
+        c.execute("DELETE FROM users WHERE email = %s", (em,))
+    sub_id = _new_user(c, "Sub Studio", RECAP_SUB)
+    c.execute("UPDATE users SET subscription_status = 'active' WHERE id = %s", (sub_id,))
+    free_id = _new_user(c, "Free Studio", RECAP_FREE)  # stays subscription_status='none' — must be excluded
 
     def rinv(owner, sid, status, amount, updated):
         c.execute(
             "INSERT INTO tracked_invoices (user_id, stripe_invoice_id, customer_name, customer_email, amount_due, "
             "currency, due_date, hosted_invoice_url, status, reminder_step, last_reminder_at, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (owner, sid, "C", "c@x.test", amount, "eur", iso(NOW - timedelta(days=10)),
              "https://pay/" + sid, status, 0, None, iso(NOW), updated),
         )
@@ -217,12 +219,12 @@ with get_conn() as c:
     rinv(free_id, "rf_open", "open", 70000, iso(NOW))                             # free user — must be excluded
 
     open1_id = c.execute(
-        "SELECT id FROM tracked_invoices WHERE user_id=? AND stripe_invoice_id='rs_open1'", (sub_id,)
+        "SELECT id FROM tracked_invoices WHERE user_id=%s AND stripe_invoice_id='rs_open1'", (sub_id,)
     ).fetchone()["id"]
     for label, sent in [("a", NOW - timedelta(days=1)), ("b", NOW - timedelta(days=3)), ("c", NOW - timedelta(days=20))]:
         c.execute(
             "INSERT INTO reminders_sent (invoice_id, user_id, step, channel, to_email, subject, sent_at) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
             (open1_id, sub_id, 1, "email", "c@x.test", "subj-" + label, iso(sent)),
         )
 
@@ -241,8 +243,8 @@ print("weekly recap selection + totals: PASS")
 
 with get_conn() as c:
     for em in (RECAP_SUB, RECAP_FREE):
-        c.execute("DELETE FROM users WHERE email = ?", (em,))
+        c.execute("DELETE FROM users WHERE email = %s", (em,))
 
 with get_conn() as c:
-    c.execute("DELETE FROM users WHERE id = ?", (uid,))  # cascade cleans connection/invoices/reminders
+    c.execute("DELETE FROM users WHERE id = %s", (uid,))  # cascade cleans connection/invoices/reminders
 print("\nALL COLLECTIONS TESTS PASSED")

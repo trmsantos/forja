@@ -8,6 +8,7 @@ stripe>=11.0
 bcrypt>=4.1
 PyJWT>=2.9
 cryptography>=43.0
-APScheduler>=3.10
+# Postgres driver (Neon). The [binary] extra ships a self-contained libpq wheel — no system libpq.
+psycopg[binary]>=3.2
 # CA bundle for verifying outbound HTTPS (Resend) — OpenSSL's default paths are unreliable across hosts.
 certifi>=2024.2.2
