@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import { Avatar } from "../components/Avatar";
 import { getDashboard, connectStripe, billingPortal, runCollections, resendVerification, startSubscription, type Dashboard, type PlanId } from "../lib/api";
 import { money } from "../lib/format";
 
@@ -171,13 +172,23 @@ export function Account() {
     <section className="bg-mist">
       <div className="shell py-16 sm:py-20">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="display text-3xl sm:text-4xl text-ink">Hi, {user.name.split(" ")[0]}.</h1>
-            <p className="mt-2 text-[15px] text-slate">{user.email}</p>
+          <div className="flex items-center gap-4">
+            <Avatar name={user.display_name || user.name} src={user.avatar_url} size={56} />
+            <div>
+              <h1 className="display text-3xl sm:text-4xl text-ink">
+                Hi, {(user.display_name || user.name).split(" ")[0]}.
+              </h1>
+              <p className="mt-2 text-[15px] text-slate">{user.email}</p>
+            </div>
           </div>
-          <button onClick={logout} className="btn-ghost !px-5 !py-2.5 text-[14px]">
-            Log out
-          </button>
+          <div className="flex items-center gap-2">
+            <Link to="/account/settings" className="btn-ghost !px-5 !py-2.5 text-[14px]">
+              Settings
+            </Link>
+            <button onClick={logout} className="btn-ghost !px-5 !py-2.5 text-[14px]">
+              Log out
+            </button>
+          </div>
         </div>
 
         {!user.email_verified && (

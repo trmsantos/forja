@@ -46,7 +46,9 @@ jobs:
         run: pip install -r backend/requirements.txt
       - name: Run test suite
         working-directory: backend
-        run: python test_collections_agent.py
+        run: |
+          python test_collections_agent.py
+          python test_profile.py
 
   frontend:
     name: Frontend typecheck + build

@@ -36,6 +36,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field
 
+from .blob import blob_configured, delete_blob, put_blob
 from .db import get_conn, init_db
 from .stripe_sync import audit_summary, sync_invoices
 from .email import (
@@ -156,6 +157,17 @@ class AuditIn(BaseModel):
     email: Optional[EmailStr] = None
 
 
+class ProfileIn(BaseModel):
+    # Full name (used on receipts/comms) plus an optional preferred name for the greeting.
+    name: str = Field(min_length=1, max_length=120)
+    display_name: Optional[str] = Field(default=None, max_length=60)
+
+
+class PasswordIn(BaseModel):
+    current_password: str = Field(min_length=1, max_length=200)
+    new_password: str = Field(min_length=8, max_length=200)
+
+
 # ---------- helpers ----------
 def _user_dict(row: dict) -> dict:
     return {
@@ -163,6 +175,8 @@ def _user_dict(row: dict) -> dict:
         "name": row["name"],
         "email": row["email"],
         "email_verified": bool(row["email_verified"]),
+        "display_name": row.get("display_name"),
+        "avatar_url": row.get("avatar_url"),
     }
 
 
@@ -189,7 +203,8 @@ def current_user(creds: HTTPAuthorizationCredentials = Depends(bearer)) -> dict:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT id, name, email, email_verified FROM users WHERE id = %s", (user_id,)
+            "SELECT id, name, email, email_verified, display_name, avatar_url FROM users WHERE id = %s",
+            (user_id,),
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=401, detail="User not found")
@@ -219,7 +234,14 @@ def register(body: RegisterIn) -> dict:
     _send_verification(user_id, body.name, body.email.lower())
     return {
         "token": create_token(user_id),
-        "user": {"id": user_id, "name": body.name, "email": body.email.lower(), "email_verified": False},
+        "user": {
+            "id": user_id,
+            "name": body.name,
+            "email": body.email.lower(),
+            "email_verified": False,
+            "display_name": None,
+            "avatar_url": None,
+        },
     }
 
 
@@ -227,7 +249,8 @@ def register(body: RegisterIn) -> dict:
 def login(body: LoginIn) -> dict:
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT id, name, email, email_verified, password_hash FROM users WHERE email = %s",
+            "SELECT id, name, email, email_verified, password_hash, display_name, avatar_url "
+            "FROM users WHERE email = %s",
             (body.email.lower(),),
         ).fetchone()
     if row is None or not verify_password(body.password, row["password_hash"]):
@@ -249,7 +272,8 @@ def verify_email(body: VerifyIn) -> dict:
     with get_conn() as conn:
         conn.execute("UPDATE users SET email_verified = 1 WHERE id = %s", (user_id,))
         row = conn.execute(
-            "SELECT id, name, email, email_verified FROM users WHERE id = %s", (user_id,)
+            "SELECT id, name, email, email_verified, display_name, avatar_url FROM users WHERE id = %s",
+            (user_id,),
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -261,6 +285,104 @@ def resend_verification(user: dict = Depends(current_user)) -> dict:
     if user["email_verified"]:
         return {"ok": True, "already_verified": True}
     _send_verification(user["id"], user["name"], user["email"])
+    return {"ok": True}
+
+
+# ---------- profile & account settings ----------
+# Accepted avatar types -> file extension. Kept small on purpose (raster photos only).
+ALLOWED_AVATAR_TYPES = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+    "image/gif": "gif",
+}
+MAX_AVATAR_BYTES = 2 * 1024 * 1024  # 2 MB
+
+
+@app.post("/api/account/profile")
+def update_profile(body: ProfileIn, user: dict = Depends(current_user)) -> dict:
+    """Update the display name (and full name). Returns the refreshed user object."""
+    name = body.name.strip()
+    display = (body.display_name or "").strip() or None
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET name = %s, display_name = %s WHERE id = %s",
+            (name, display, user["id"]),
+        )
+        row = conn.execute(
+            "SELECT id, name, email, email_verified, display_name, avatar_url FROM users WHERE id = %s",
+            (user["id"],),
+        ).fetchone()
+    return _user_dict(row)
+
+
+@app.post("/api/account/password")
+def change_password(body: PasswordIn, user: dict = Depends(current_user)) -> dict:
+    """Change the password after re-verifying the current one."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT password_hash FROM users WHERE id = %s", (user["id"],)).fetchone()
+        if row is None or not verify_password(body.current_password, row["password_hash"]):
+            raise HTTPException(status_code=400, detail="Your current password is incorrect.")
+        conn.execute(
+            "UPDATE users SET password_hash = %s WHERE id = %s",
+            (hash_password(body.new_password), user["id"]),
+        )
+    return {"ok": True}
+
+
+@app.post("/api/account/avatar")
+async def upload_avatar(request: Request, user: dict = Depends(current_user)) -> dict:
+    """Store a profile photo on Vercel Blob. The image is sent as the raw request body with the
+    image type as Content-Type — we read request.body() directly to avoid pulling python-multipart
+    into the serverless bundle."""
+    if not blob_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Photo uploads aren't switched on yet. Connect a Vercel Blob store to enable them.",
+        )
+    content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    ext = ALLOWED_AVATAR_TYPES.get(content_type)
+    if not ext:
+        raise HTTPException(status_code=400, detail="Please upload a PNG, JPG, WEBP, or GIF image.")
+
+    data = await request.body()
+    if not data:
+        raise HTTPException(status_code=400, detail="No image received.")
+    if len(data) > MAX_AVATAR_BYTES:
+        raise HTTPException(status_code=413, detail="That image is too large (2 MB max).")
+
+    try:
+        url = put_blob(f"avatars/user-{user['id']}.{ext}", data, content_type)
+    except Exception as exc:  # noqa: BLE001 - surface a clean error, log the cause
+        print("[avatar] upload failed:", exc)
+        raise HTTPException(status_code=502, detail="Could not store the image. Please try again.")
+
+    with get_conn() as conn:
+        prev = conn.execute("SELECT avatar_url FROM users WHERE id = %s", (user["id"],)).fetchone()
+        conn.execute("UPDATE users SET avatar_url = %s WHERE id = %s", (url, user["id"]))
+    if prev and prev["avatar_url"]:
+        delete_blob(prev["avatar_url"])  # best-effort cleanup of the replaced photo
+    return {"avatar_url": url}
+
+
+@app.delete("/api/account/avatar")
+def remove_avatar(user: dict = Depends(current_user)) -> dict:
+    with get_conn() as conn:
+        prev = conn.execute("SELECT avatar_url FROM users WHERE id = %s", (user["id"],)).fetchone()
+        conn.execute("UPDATE users SET avatar_url = NULL WHERE id = %s", (user["id"],))
+    if prev and prev["avatar_url"]:
+        delete_blob(prev["avatar_url"])
+    return {"ok": True}
+
+
+@app.post("/api/connect/disconnect")
+def disconnect_stripe(user: dict = Depends(current_user)) -> dict:
+    """Revoke the Stripe connection. The daily sweep only touches active connections, so this
+    stops all chasing immediately; synced invoices stay for the record until re-connected."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE connections SET status = 'revoked' WHERE user_id = %s", (user["id"],)
+        )
     return {"ok": True}
 
 

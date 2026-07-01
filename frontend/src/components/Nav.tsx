@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Logo } from "./Logo";
+import { Avatar } from "./Avatar";
 import { nav } from "../lib/content";
 import { useAuth } from "../lib/auth";
 
@@ -32,8 +33,9 @@ export function Nav() {
             Free audit
           </Link>
           {user ? (
-            <Link to="/account" className="btn-dark !px-5 !py-2.5 text-[14px]">
-              {user.name.split(" ")[0]}
+            <Link to="/account" className="btn-dark !py-1.5 !pl-1.5 !pr-4 text-[14px]">
+              <Avatar name={user.display_name || user.name} src={user.avatar_url} size={26} />
+              {(user.display_name || user.name).split(" ")[0]}
             </Link>
           ) : (
             <>
@@ -72,9 +74,14 @@ export function Nav() {
             </Link>
             <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3">
               {user ? (
-                <Link to="/account" onClick={() => setOpen(false)} className="btn-dark">
-                  {user.name.split(" ")[0]}&rsquo;s account
-                </Link>
+                <>
+                  <Link to="/account" onClick={() => setOpen(false)} className="btn-dark">
+                    {(user.display_name || user.name).split(" ")[0]}&rsquo;s account
+                  </Link>
+                  <Link to="/account/settings" onClick={() => setOpen(false)} className="btn-ghost">
+                    Settings
+                  </Link>
+                </>
               ) : (
                 <>
                   <Link to="/login" onClick={() => setOpen(false)} className="btn-ghost">

@@ -43,10 +43,16 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 stripe_customer_id TEXT,
                 subscription_status TEXT NOT NULL DEFAULT 'none',  -- none|trialing|active|past_due|canceled
-                trial_ends_at TEXT
+                trial_ends_at TEXT,
+                display_name TEXT,  -- optional preferred name shown in the UI (falls back to name)
+                avatar_url TEXT     -- profile photo, stored on Vercel Blob
             )
             """
         )
+        # Lightweight migration for the already-provisioned prod DB: CREATE TABLE IF NOT EXISTS
+        # above never adds columns to an existing table, so add the profile columns idempotently.
+        conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT")
+        conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS leads (
