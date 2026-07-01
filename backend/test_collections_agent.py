@@ -17,7 +17,11 @@ from app.db import init_db, get_conn  # noqa: E402
 from app.security import encrypt_secret  # noqa: E402
 from app import collections_agent as ca  # noqa: E402
 
-NOW = datetime(2026, 6, 26, 12, 0, tzinfo=timezone.utc)
+# Use the real clock: run_sweep()/collect_recaps() call datetime.now() internally, so seeding
+# fixture dates relative to a hard-coded date made the gap/overdue math drift as the calendar
+# moved (a "2 days ago" reminder eventually crossed MIN_GAP_DAYS). Anchoring to now keeps the
+# relative offsets — and the assertions — stable on any day.
+NOW = datetime.now(timezone.utc)
 
 
 def iso(dt):
