@@ -7,9 +7,11 @@ import { Comparison } from "../components/Comparison";
 import { Outcomes } from "../components/Outcomes";
 import { Process } from "../components/Process";
 import { Testimonials } from "../components/Testimonials";
+import { Security } from "../components/Security";
 import { Pricing } from "../components/Pricing";
 import { Faq } from "../components/Faq";
 import { Contact } from "../components/Contact";
+import { FinalCta } from "../components/FinalCta";
 
 export function Home() {
   const { hash } = useLocation();
@@ -29,9 +31,11 @@ export function Home() {
       <Outcomes />
       <Process />
       <Testimonials />
+      <Security />
       <Pricing />
       <Faq />
       <Contact />
+      <FinalCta />
     </div>
   );
 }

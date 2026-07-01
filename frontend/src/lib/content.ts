@@ -181,7 +181,33 @@ export const faqs: Faq[] = [
 export const nav = [
   { label: "Why Forja", href: "/#why" },
   { label: "How it works", href: "/#process" },
-  { label: "Results", href: "/#work" },
+  { label: "Security", href: "/#security" },
   { label: "Pricing", href: "/#pricing" },
   { label: "FAQ", href: "/#faq" },
 ];
+
+export type SecurityPoint = { title: string; body: string };
+
+export const security: { heading: string; intro: string; points: SecurityPoint[] } = {
+  heading: "Built to be trusted with your Stripe.",
+  intro:
+    "Forja reads your invoices to chase them, nothing more. Here's exactly what it can and can't touch.",
+  points: [
+    {
+      title: "Read-only, restricted access",
+      body: "You connect a Stripe restricted key scoped to Invoices: Read. Forja can see overdue invoices — it can't move money, issue refunds, or change anything.",
+    },
+    {
+      title: "Your key, encrypted at rest",
+      body: "The key is encrypted before it is stored and used only to read invoices. Disconnect in one click and it's gone.",
+    },
+    {
+      title: "It sends in your name",
+      body: "Reminders go out as your studio, with Reply-To set to you, so client replies reach you and never Forja.",
+    },
+    {
+      title: "Stops the moment it's paid",
+      body: "Every invoice re-syncs from Stripe before a send; the instant it's marked paid, the chasing stops. Dry-run lets you watch first.",
+    },
+  ],
+};

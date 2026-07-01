@@ -31,6 +31,11 @@
   }
   .display {
     @apply font-display font-bold tracking-tight2 leading-[1.02];
+    text-wrap: balance;
+  }
+  /* Long prose: fewer orphans without touching line length. */
+  .prose-pretty {
+    text-wrap: pretty;
   }
   /* Specific properties only (never `all`); press feedback per Emil. */
   .btn {

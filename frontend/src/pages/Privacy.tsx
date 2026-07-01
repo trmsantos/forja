@@ -1,6 +1,6 @@
 import { brand } from "../lib/content";
 
-const UPDATED = "28 June 2026";
+const UPDATED = "1 July 2026";
 
 function H({ children }: { children: React.ReactNode }) {
   return <h2 className="display mt-10 text-2xl text-ink">{children}</h2>;
@@ -46,9 +46,17 @@ export function Privacy() {
 
         <H>Sub-processors</H>
         <P>
-          We rely on: Stripe (payments and invoice data), Resend (sending email), Fly.io (backend
-          hosting), and Vercel (frontend hosting). Each processes data only to deliver their part of
-          the service.
+          We rely on: Stripe (payments and invoice data), Resend (sending email), Vercel (hosting for
+          the site and the serverless API), and Neon (managed Postgres database). Each processes data
+          only to deliver their part of the service.
+        </P>
+
+        <H>Cookies &amp; local storage</H>
+        <P>
+          Forja uses a single essential item in your browser's storage to keep you signed in after you
+          log in. We don't use advertising or third-party tracking cookies, and we don't run profiling
+          analytics. Because this storage is strictly necessary to provide the service, it doesn't
+          require consent — you can clear it anytime by logging out or clearing your browser storage.
         </P>
 
         <H>Retention &amp; deletion</H>

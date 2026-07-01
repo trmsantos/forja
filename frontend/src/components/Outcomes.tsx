@@ -12,20 +12,23 @@ export function Outcomes() {
           </p>
         </Reveal>
 
-        <div className="mt-14 grid gap-5 lg:grid-cols-3">
+        <div className="mt-14 grid gap-x-10 gap-y-12 md:grid-cols-3">
           {outcomes.map((o, i) => (
-            <Reveal key={o.client} delay={i * 0.08}>
-              <article className="card h-full p-7 shadow-soft">
-                <p className="text-[13px] font-semibold uppercase tracking-wide text-ember">{o.client}</p>
-                <p className="mt-4 text-[15px] leading-relaxed text-slate">{o.problem}</p>
-                <p className="mt-3 text-[15px] leading-relaxed text-ink">{o.built}</p>
-                <p className="mt-6 border-t border-line pt-5 font-display text-lg font-bold leading-snug text-ink">
-                  {o.result}
-                </p>
-              </article>
+            <Reveal key={o.client} delay={i * 0.08} className="border-t border-line pt-6">
+              <p className="font-mono text-[12px] uppercase tracking-[0.14em] text-ember">{o.client}</p>
+              <p className="mt-4 font-display text-[22px] font-bold leading-snug tracking-tight2 text-ink">{o.result}</p>
+              <p className="prose-pretty mt-4 text-[14px] leading-relaxed text-slate">
+                {o.problem} {o.built}
+              </p>
             </Reveal>
           ))}
         </div>
+
+        <Reveal>
+          <p className="mt-10 text-[13px] text-slate/70">
+            Illustrative examples — replaced with named customer results before launch.
+          </p>
+        </Reveal>
       </div>
     </section>
   );
