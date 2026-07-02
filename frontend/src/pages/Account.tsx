@@ -371,14 +371,19 @@ export function Account() {
             <div className="mt-5 card p-7 shadow-soft">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 className="font-display text-xl font-bold text-ink">Tracked invoices</h2>
-                <button
-                  onClick={runChase}
-                  disabled={chasing || !planActive}
-                  title={planActive ? undefined : "Start your free trial to chase invoices"}
-                  className="btn-ember !px-4 !py-2 text-[13px] disabled:opacity-60"
-                >
-                  {chasing ? "Chasing…" : "Run chase now"}
-                </button>
+                <div className="flex items-center gap-4">
+                  <Link to="/account/reminders" className="text-[14px] font-medium text-ember hover:underline">
+                    Preview &amp; customize reminders
+                  </Link>
+                  <button
+                    onClick={runChase}
+                    disabled={chasing || !planActive}
+                    title={planActive ? undefined : "Start your free trial to chase invoices"}
+                    className="btn-ember !px-4 !py-2 text-[13px] disabled:opacity-60"
+                  >
+                    {chasing ? "Chasing…" : "Run chase now"}
+                  </button>
+                </div>
               </div>
               {data.invoices.length === 0 ? (
                 <p className="mt-4 text-[15px] leading-relaxed text-slate">

@@ -168,6 +168,13 @@ class PasswordIn(BaseModel):
     new_password: str = Field(min_length=8, max_length=200)
 
 
+class ReminderSettingsIn(BaseModel):
+    # What debtors see and how often. business_name falls back to the account name when blank.
+    business_name: Optional[str] = Field(default=None, max_length=80)
+    tone: str = Field(default="friendly")  # friendly | firm (validated in the handler)
+    gap_days: int = Field(default=7, ge=1, le=30)
+
+
 # ---------- helpers ----------
 def _user_dict(row: dict) -> dict:
     return {
@@ -413,6 +420,68 @@ def disconnect_stripe(user: dict = Depends(current_user)) -> dict:
             "UPDATE connections SET status = 'revoked' WHERE user_id = %s", (user["id"],)
         )
     return {"ok": True}
+
+
+# ---------- reminder settings & preview ----------
+REMINDER_TONES = {"friendly", "firm"}
+_DEFAULT_GAP_DAYS = int(os.getenv("COLLECTIONS_MIN_GAP_DAYS", "7"))
+
+
+def _reminder_settings(row: dict) -> dict:
+    """Resolve effective reminder settings, applying fallbacks (business name -> preferred ->
+    legal name; tone -> friendly; gap -> the engine default)."""
+    return {
+        "business_name": (row.get("business_name") or row.get("display_name") or row["name"]),
+        "tone": row.get("reminder_tone") or "friendly",
+        "gap_days": row.get("reminder_gap_days") or _DEFAULT_GAP_DAYS,
+    }
+
+
+_REMINDER_COLS = "name, display_name, business_name, reminder_tone, reminder_gap_days"
+
+
+@app.get("/api/reminders/settings")
+def get_reminder_settings(user: dict = Depends(current_user)) -> dict:
+    with get_conn() as conn:
+        row = conn.execute(f"SELECT {_REMINDER_COLS} FROM users WHERE id = %s", (user["id"],)).fetchone()
+    return _reminder_settings(row)
+
+
+@app.post("/api/reminders/settings")
+def update_reminder_settings(body: ReminderSettingsIn, user: dict = Depends(current_user)) -> dict:
+    tone = body.tone if body.tone in REMINDER_TONES else "friendly"
+    business = (body.business_name or "").strip() or None
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET business_name = %s, reminder_tone = %s, reminder_gap_days = %s WHERE id = %s",
+            (business, tone, body.gap_days, user["id"]),
+        )
+        row = conn.execute(f"SELECT {_REMINDER_COLS} FROM users WHERE id = %s", (user["id"],)).fetchone()
+    return _reminder_settings(row)
+
+
+@app.get("/api/reminders/preview")
+def preview_reminders(user: dict = Depends(current_user)) -> dict:
+    """Render the exact gentle -> firm -> final emails a debtor would receive, using the user's
+    current settings and sample invoice data. Nothing is sent — this is a read-only preview."""
+    from .email import reminder_html, reminder_subject
+
+    with get_conn() as conn:
+        row = conn.execute(f"SELECT {_REMINDER_COLS} FROM users WHERE id = %s", (user["id"],)).fetchone()
+    s = _reminder_settings(row)
+    studio, tone, gap = s["business_name"], s["tone"], s["gap_days"]
+
+    sample_name, sample_amount = "Sample Client", "1,200.00 EUR"
+    sample_pay_url = "https://invoice.stripe.com/i/preview"
+    steps = [
+        {
+            "step": step,
+            "subject": reminder_subject(step, studio, 3 + i * gap),
+            "html": reminder_html(step, studio, sample_name, sample_amount, 3 + i * gap, sample_pay_url, tone=tone),
+        }
+        for i, step in enumerate((1, 2, 3))
+    ]
+    return {**s, "steps": steps}
 
 
 @app.get("/api/account/requests")

@@ -45,14 +45,20 @@ def init_db() -> None:
                 subscription_status TEXT NOT NULL DEFAULT 'none',  -- none|trialing|active|past_due|canceled
                 trial_ends_at TEXT,
                 display_name TEXT,  -- optional preferred name shown in the UI (falls back to name)
-                avatar_url TEXT     -- profile photo, stored on Vercel Blob
+                avatar_url TEXT,    -- profile photo, stored on Vercel Blob
+                business_name TEXT, -- studio/sender name shown to debtors in reminders (falls back to name)
+                reminder_tone TEXT, -- 'friendly' | 'firm' (app default 'friendly')
+                reminder_gap_days INTEGER  -- days between reminders (app default = COLLECTIONS_MIN_GAP_DAYS)
             )
             """
         )
         # Lightweight migration for the already-provisioned prod DB: CREATE TABLE IF NOT EXISTS
-        # above never adds columns to an existing table, so add the profile columns idempotently.
+        # above never adds columns to an existing table, so add newer columns idempotently.
         conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT")
         conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT")
+        conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS business_name TEXT")
+        conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS reminder_tone TEXT")
+        conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS reminder_gap_days INTEGER")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS leads (

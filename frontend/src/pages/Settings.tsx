@@ -255,6 +255,21 @@ export function Settings() {
           </form>
         </div>
 
+        {/* Reminder emails */}
+        <div className="mt-6 card p-7 shadow-soft sm:p-8">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 className="font-display text-xl font-bold text-ink">Reminder emails</h2>
+              <p className="mt-2 max-w-prose text-[14px] leading-relaxed text-slate">
+                Set your sender name, tone, and cadence, and preview exactly what your clients receive.
+              </p>
+            </div>
+            <Link to="/account/reminders" className="btn-ghost !px-5 !py-2.5 text-[14px]">
+              Customize reminders
+            </Link>
+          </div>
+        </div>
+
         {/* Password */}
         <div className="mt-6 card p-7 shadow-soft sm:p-8">
           <h2 className="font-display text-xl font-bold text-ink">Password</h2>
