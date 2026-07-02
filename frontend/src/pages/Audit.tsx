@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { runAudit, type AuditSummary } from "../lib/api";
 import { money } from "../lib/format";
+import { setAuditTeaser } from "../lib/auditTeaser";
 import { FormError } from "../components/FormError";
 
 function AuditStat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
@@ -27,6 +28,15 @@ export function Audit() {
     try {
       const summary = await runAudit(apiKey.trim(), email.trim() || undefined);
       setResult(summary);
+      // Carry the "you have €X overdue" moment into signup + the first connect step.
+      // Numbers only — never the key (the audit stays stateless).
+      if (summary.overdue_amount > 0) {
+        setAuditTeaser({
+          overdueAmount: summary.overdue_amount,
+          overdueCount: summary.overdue_count,
+          currency: summary.currency,
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not run the audit");
     } finally {
@@ -149,7 +159,7 @@ export function Audit() {
                     with the recovered total always in plain sight.
                   </p>
                   <Link to="/signup" className="btn-ember mt-4 inline-flex">
-                    Start chasing these →
+                    {oldest ? `Start recovering ${money(result.overdue_amount, result.currency)} →` : "Create your account →"}
                   </Link>
                 </div>
               </div>
