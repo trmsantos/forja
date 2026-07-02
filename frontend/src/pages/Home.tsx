@@ -6,7 +6,6 @@ import { Services } from "../components/Services";
 import { Comparison } from "../components/Comparison";
 import { Outcomes } from "../components/Outcomes";
 import { Process } from "../components/Process";
-import { Testimonials } from "../components/Testimonials";
 import { Security } from "../components/Security";
 import { Pricing } from "../components/Pricing";
 import { Faq } from "../components/Faq";
@@ -26,12 +25,13 @@ export function Home() {
   return (
     <div>
       <Hero />
-      <Services />
+      {/* Answer "don't I already have this in Stripe?" and prove trust before anything else —
+          both are make-or-break for a tool that touches someone's Stripe + client relationships. */}
       <Comparison />
-      <Outcomes />
-      <Process />
-      <Testimonials />
       <Security />
+      <Services />
+      <Process />
+      <Outcomes />
       <Pricing />
       <Faq />
       <Contact />

@@ -76,8 +76,8 @@ export function Hero() {
           </motion.h1>
 
           <motion.p {...rise(1)} className="prose-pretty mt-6 max-w-prose text-[19px] leading-relaxed text-slate">
-            Connect Stripe with a read-only key. Forja chases your overdue invoices with polite, escalating
-            reminders in your name — until the client pays, then it stops.
+            Connect Stripe with a read-only key. Instead of Stripe's generic reminder template, Forja runs the
+            whole chase in your studio's voice — gentle, then firmer — until the client pays, then it stops.
           </motion.p>
 
           <motion.div {...rise(2)} className="mt-8 flex flex-wrap items-center gap-3">

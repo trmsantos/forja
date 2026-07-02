@@ -6,9 +6,9 @@ export function Outcomes() {
     <section id="work" className="bg-mist">
       <div className="shell py-24 sm:py-28">
         <Reveal>
-          <h2 className="display max-w-[18ch] text-[clamp(1.9rem,4.5vw,3.2rem)] text-ink">Less chasing. More collected.</h2>
+          <h2 className="display max-w-[18ch] text-[clamp(1.9rem,4.5vw,3.2rem)] text-ink">How Forja works for teams like yours.</h2>
           <p className="mt-5 max-w-prose text-[17px] leading-relaxed text-slate">
-            A few of the ways Forja turns overdue invoices into paid ones.
+            A few kinds of studio, and how Forja handles the chasing for each.
           </p>
         </Reveal>
 
@@ -23,12 +23,6 @@ export function Outcomes() {
             </Reveal>
           ))}
         </div>
-
-        <Reveal>
-          <p className="mt-10 text-[13px] text-slate/70">
-            Illustrative examples — replaced with named customer results before launch.
-          </p>
-        </Reveal>
       </div>
     </section>
   );

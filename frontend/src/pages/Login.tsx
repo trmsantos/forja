@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { AuthShell } from "../components/AuthShell";
+import { FormError } from "../components/FormError";
 
 export function Login() {
   const { user, login } = useAuth();
@@ -30,7 +31,7 @@ export function Login() {
   return (
     <AuthShell
       title="Welcome back."
-      subtitle="Log in to see your projects and requests."
+      subtitle="Log in to your collections dashboard."
       footer={
         <>
           New here?{" "}
@@ -41,12 +42,12 @@ export function Login() {
       }
     >
       <form onSubmit={onSubmit} className="grid gap-4">
-        <input required type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} className="field" />
-        <input required type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} className="field" />
+        <input required type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} className="field" autoComplete="email" />
+        <input required type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} className="field" autoComplete="current-password" />
         <button type="submit" disabled={busy} className="btn-ember disabled:opacity-60">
           {busy ? "Logging in…" : "Log in"}
         </button>
-        {error && <p className="font-mono text-[12px] uppercase tracking-[0.14em] text-ember">{error}</p>}
+        <FormError message={error} />
       </form>
     </AuthShell>
   );
