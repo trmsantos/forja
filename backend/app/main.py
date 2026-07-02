@@ -734,7 +734,10 @@ def billing_subscribe(body: SubscribeIn, user: dict = Depends(current_user)) -> 
             mode="subscription",
             line_items=[{"price": price_id, "quantity": 1}],
             customer_email=user["email"],
-            client_reference_id=str(user["id"]),  # lets the webhook match the user even before a customer id exists
+            client_reference_id=str(user["id"]),  # matches the user on checkout.session.completed
+            # Stamp the user id on the subscription too, so later customer.subscription.* events
+            # (which don't carry client_reference_id) resolve the user regardless of arrival order.
+            subscription_data={"metadata": {"forja_user_id": str(user["id"])}},
             allow_promotion_codes=True,
             success_url=f"{FRONTEND_ORIGIN}/account?subscription=success",
             cancel_url=f"{FRONTEND_ORIGIN}/account?subscription=cancelled",
@@ -813,20 +816,44 @@ def cron_daily(request: Request) -> dict:
     return result
 
 
+def _user_id_from_metadata(obj: dict) -> Optional[int]:
+    """Our user id stamped on the Stripe subscription's metadata (forja_user_id), if present."""
+    raw = (obj.get("metadata") or {}).get("forja_user_id")
+    try:
+        return int(raw) if raw else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _set_subscription(
-    customer_id: Optional[str], status: Optional[str], trial_iso: Optional[str], email: Optional[str] = None
+    customer_id: Optional[str],
+    status: Optional[str],
+    trial_iso: Optional[str],
+    email: Optional[str] = None,
+    user_id: Optional[int] = None,
 ) -> None:
-    """Update a user's subscription state. Matches by Stripe customer id; falls back to
-    email (used at checkout, the one event that carries both id and email)."""
-    if not customer_id:
-        return
+    """Update a user's subscription state, resolving the user in priority order:
+    user_id (from subscription metadata / client_reference_id) -> Stripe customer id -> email.
+    This is order-robust: customer.subscription.* events resolve even if they arrive before the
+    customer id was linked at checkout."""
     with get_conn() as conn:
-        cur = conn.execute(
-            "UPDATE users SET subscription_status = %s, trial_ends_at = %s, stripe_customer_id = %s "
-            "WHERE stripe_customer_id = %s",
-            (status, trial_iso, customer_id, customer_id),
-        )
-        if cur.rowcount == 0 and email:
+        if user_id is not None:
+            cur = conn.execute(
+                "UPDATE users SET subscription_status = %s, trial_ends_at = %s, "
+                "stripe_customer_id = COALESCE(%s, stripe_customer_id) WHERE id = %s",
+                (status, trial_iso, customer_id, user_id),
+            )
+            if cur.rowcount:
+                return
+        if customer_id:
+            cur = conn.execute(
+                "UPDATE users SET subscription_status = %s, trial_ends_at = %s, stripe_customer_id = %s "
+                "WHERE stripe_customer_id = %s",
+                (status, trial_iso, customer_id, customer_id),
+            )
+            if cur.rowcount:
+                return
+        if email:
             conn.execute(
                 "UPDATE users SET subscription_status = %s, trial_ends_at = %s, stripe_customer_id = %s "
                 "WHERE email = %s",
@@ -886,34 +913,23 @@ async def stripe_webhook(request: Request) -> dict:
         currency = obj.get("currency")
         description = (obj.get("metadata") or {}).get("description") or description
         stripe_id = obj.get("id")
-        # Subscription checkout: link the Stripe customer to this user now, so later
-        # customer.subscription.* events (which carry only the customer id) can match.
-        # We created the session with a trial, so mark it trialing; the subsequent
-        # customer.subscription.* event then keeps the exact status in sync.
+        # Subscription checkout completed = a paid conversion (our subscribe flow carries no
+        # trial). Link the Stripe customer and mark the plan active; the subsequent
+        # customer.subscription.* events then keep the exact status in sync (past_due, canceled…).
         if obj.get("mode") == "subscription" or obj.get("subscription"):
-            customer_id = obj.get("customer")
             ref = obj.get("client_reference_id")
-            linked = False
-            if ref and customer_id:
-                try:
-                    with get_conn() as conn:
-                        conn.execute(
-                            "UPDATE users SET stripe_customer_id = %s, subscription_status = 'trialing' "
-                            "WHERE id = %s",
-                            (customer_id, int(ref)),
-                        )
-                    linked = True
-                except (ValueError, psycopg.Error):
-                    linked = False
-            if not linked and email:
-                _set_subscription(customer_id, "trialing", None, email=email)
+            try:
+                ref_id = int(ref) if ref else None
+            except (TypeError, ValueError):
+                ref_id = None
+            _set_subscription(obj.get("customer"), "active", None, email=email, user_id=ref_id)
     elif etype.startswith("customer.subscription."):
         status = "canceled" if etype.endswith(".deleted") else obj.get("status")
         trial_end = obj.get("trial_end")
         trial_iso = (
             datetime.fromtimestamp(trial_end, tz=timezone.utc).isoformat() if trial_end else None
         )
-        _set_subscription(obj.get("customer"), status, trial_iso)
+        _set_subscription(obj.get("customer"), status, trial_iso, user_id=_user_id_from_metadata(obj))
         return {"received": True}
     elif etype in ("invoice.paid", "invoice.payment_succeeded"):
         email = obj.get("customer_email")
