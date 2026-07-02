@@ -122,6 +122,7 @@ def init_db() -> None:
                 status TEXT NOT NULL DEFAULT 'open',  -- open | paid | void | uncollectible
                 reminder_step INTEGER NOT NULL DEFAULT 0,  -- which escalation step we've reached
                 last_reminder_at TEXT,
+                chase_paused INTEGER NOT NULL DEFAULT 0,  -- 1 = user excluded this invoice from chasing
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 UNIQUE (user_id, stripe_invoice_id)
@@ -146,6 +147,7 @@ def init_db() -> None:
         )
 
         # Indexes for the two hot paths: the dashboard (per-user) and the cron sweep.
+        conn.execute("ALTER TABLE tracked_invoices ADD COLUMN IF NOT EXISTS chase_paused INTEGER NOT NULL DEFAULT 0")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tracked_user_status ON tracked_invoices(user_id, status)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tracked_status_due ON tracked_invoices(status, due_date)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_reminders_invoice ON reminders_sent(invoice_id)")

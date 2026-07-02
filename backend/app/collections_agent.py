@@ -174,7 +174,8 @@ def run_sweep(user_id: Optional[int] = None, dry_run: Optional[bool] = None) -> 
                 continue
             gap = user_row["reminder_gap_days"] or MIN_GAP_DAYS
             invoices = conn.execute(
-                "SELECT * FROM tracked_invoices WHERE user_id = %s AND status = 'open'", (uid,)
+                "SELECT * FROM tracked_invoices WHERE user_id = %s AND status = 'open' AND chase_paused = 0",
+                (uid,),
             ).fetchall()
             for inv in invoices:
                 step = next_reminder_step(dict(inv), now, gap_days=gap)

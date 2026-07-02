@@ -165,6 +165,7 @@ export type TrackedInvoice = {
   status: string;
   reminder_step: number;
   last_reminder_at?: string | null;
+  chase_paused: number; // 1 = excluded from chasing
 };
 
 export type Dashboard = {
@@ -313,6 +314,22 @@ export async function getReminderPreview(): Promise<ReminderPreview> {
   const res = await fetch("/api/reminders/preview", { headers: { ...authHeaders() } });
   if (!res.ok) throw new Error("Could not load the reminder preview");
   return (await res.json()) as ReminderPreview;
+}
+
+export async function sendTestReminder(): Promise<{ sent: boolean; to: string }> {
+  const res = await fetch("/api/reminders/test", { method: "POST", headers: { ...authHeaders() } });
+  if (!res.ok) throw new Error(await detail(res, "Could not send the test"));
+  return (await res.json()) as { sent: boolean; to: string };
+}
+
+// Exclude/re-include a single invoice from automatic chasing.
+export async function pauseInvoice(stripeInvoiceId: string, paused: boolean): Promise<void> {
+  const res = await fetch("/api/invoices/pause", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ stripe_invoice_id: stripeInvoiceId, paused }),
+  });
+  if (!res.ok) throw new Error(await detail(res, "Could not update the invoice"));
 }
 
 // ----- Admin analytics (owner-only) -----

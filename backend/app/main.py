@@ -179,6 +179,11 @@ class ReminderSettingsIn(BaseModel):
     gap_days: int = Field(default=7, ge=1, le=30)
 
 
+class PauseInvoiceIn(BaseModel):
+    stripe_invoice_id: str = Field(min_length=1, max_length=120)
+    paused: bool
+
+
 # ---------- helpers ----------
 def _user_dict(row: dict) -> dict:
     return {
@@ -497,6 +502,38 @@ def preview_reminders(user: dict = Depends(current_user)) -> dict:
     return {**s, "steps": steps}
 
 
+@app.post("/api/reminders/test")
+def send_test_reminder(user: dict = Depends(current_user)) -> dict:
+    """Email a sample reminder to the signed-in user's OWN address so they can see exactly what a
+    client receives. Always sends for real (to themselves) regardless of COLLECTIONS_DRY_RUN — it
+    never touches a debtor — so it works even before the sending domain is verified."""
+    from .email import reminder_html, reminder_subject, send_email
+
+    with get_conn() as conn:
+        row = conn.execute(f"SELECT {_REMINDER_COLS} FROM users WHERE id = %s", (user["id"],)).fetchone()
+    s = _reminder_settings(row)
+    subject = "[Forja test] " + reminder_subject(1, s["business_name"], 3)
+    html = reminder_html(
+        1, s["business_name"], user["name"], "1,200.00 EUR", 3, "https://invoice.stripe.com/i/preview", tone=s["tone"]
+    )
+    sent = send_email(user["email"], subject, html, reply_to=user["email"])
+    return {"ok": True, "sent": sent, "to": user["email"]}
+
+
+@app.post("/api/invoices/pause")
+def pause_invoice(body: PauseInvoiceIn, user: dict = Depends(current_user)) -> dict:
+    """Exclude (or re-include) one invoice from automatic chasing — for a client on a payment plan,
+    a dispute, or an account the user wants to handle personally."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE tracked_invoices SET chase_paused = %s WHERE user_id = %s AND stripe_invoice_id = %s",
+            (1 if body.paused else 0, user["id"], body.stripe_invoice_id),
+        )
+    if cur.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Invoice not found.")
+    return {"ok": True, "paused": body.paused}
+
+
 @app.get("/api/account/requests")
 def account_requests(user: dict = Depends(current_user)) -> list:
     with get_conn() as conn:
@@ -697,7 +734,7 @@ def dashboard(user: dict = Depends(current_user)) -> dict:
         ).fetchone()["c"]
         invoices = conn.execute(
             "SELECT stripe_invoice_id, customer_name, customer_email, amount_due, currency, "
-            "due_date, hosted_invoice_url, status, reminder_step, last_reminder_at "
+            "due_date, hosted_invoice_url, status, reminder_step, last_reminder_at, chase_paused "
             "FROM tracked_invoices WHERE user_id = %s ORDER BY due_date IS NULL, due_date ASC",
             (user["id"],),
         ).fetchall()

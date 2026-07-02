@@ -5,6 +5,7 @@ import { FormError } from "../components/FormError";
 import {
   getReminderPreview,
   getReminderSettings,
+  sendTestReminder,
   updateReminderSettings,
   type ReminderPreview,
   type ReminderTone,
@@ -25,6 +26,9 @@ export function Reminders() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+
+  const [testing, setTesting] = useState(false);
+  const [testMsg, setTestMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -60,6 +64,19 @@ export function Reminders() {
       setError(err instanceof Error ? err.message : "Could not save your reminder settings");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function sendTest() {
+    setTesting(true);
+    setTestMsg(null);
+    try {
+      const { sent, to } = await sendTestReminder();
+      setTestMsg(sent ? `Sent to ${to} — check your inbox.` : "Email isn't configured yet, so nothing was sent.");
+    } catch (err) {
+      setTestMsg(err instanceof Error ? err.message : "Could not send the test.");
+    } finally {
+      setTesting(false);
     }
   }
 
@@ -172,6 +189,12 @@ export function Reminders() {
                 <p className="mt-3 text-[13px] text-slate">
                   Exactly what a client receives — shown with a sample invoice. Replies go to you, not Forja.
                 </p>
+                <div className="mt-5 flex flex-wrap items-center gap-4 border-t border-line pt-5">
+                  <button type="button" onClick={sendTest} disabled={testing} className="btn-ghost !px-5 !py-2.5 text-[14px] disabled:opacity-60">
+                    {testing ? "Sending…" : "Send a test to my inbox"}
+                  </button>
+                  {testMsg && <span className="text-[13px] text-slate">{testMsg}</span>}
+                </div>
               </>
             ) : (
               <p className="mt-5 text-[15px] text-slate">Loading preview…</p>
