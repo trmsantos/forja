@@ -51,6 +51,7 @@ jobs:
           python test_profile.py
           python test_billing.py
           python test_reminders.py
+          python test_hardening.py
 
   frontend:
     name: Frontend typecheck + build

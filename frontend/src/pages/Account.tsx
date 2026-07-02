@@ -261,6 +261,15 @@ export function Account() {
         ) : !data.connected ? (
           <div className="mt-8 card p-7 shadow-soft sm:p-9">
             <h2 className="font-display text-2xl font-bold text-ink">Connect your Stripe account</h2>
+            {data.connection_status === "error" && (
+              <div className="mt-4 rounded-2xl border border-emberdeep/60 bg-blush p-4">
+                <p className="text-[14px] leading-relaxed text-ink">
+                  <span className="font-semibold text-emberlit">We couldn't read your Stripe.</span>{" "}
+                  {data.connection_error || "The key may have been revoked or lost access to Invoices."} Reconnect
+                  below to resume chasing.
+                </p>
+              </div>
+            )}
             {teaser && (
               <div className="mt-4 rounded-2xl border border-ember/40 bg-blush p-4">
                 <p className="text-[14px] leading-relaxed text-ink">

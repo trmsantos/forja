@@ -622,12 +622,19 @@ def connect_stripe(body: ConnectStripeIn, user: dict = Depends(current_user)) ->
                 stripe_account_id = excluded.stripe_account_id,
                 encrypted_key = excluded.encrypted_key,
                 status = 'active',
+                error_reason = NULL,
                 last_synced_at = excluded.last_synced_at
             """,
             (user["id"], account_id, encrypt_secret(key), now, now),
         )
 
-    result = sync_invoices(user["id"], key)
+    # Defensive: the key already validated above, but don't let a transient sync hiccup 500 the
+    # connect — the connection is saved and the daily sweep will sync on its next run.
+    try:
+        result = sync_invoices(user["id"], key)
+    except Exception as exc:
+        print("[connect] initial sync failed (connection saved, will retry on sweep):", exc)
+        result = {"synced": 0, "reconciled": 0}
 
     # Activation: the moment Stripe is connected, start a free, self-managed trial so chasing is
     # on immediately — this is what makes "connect once and it runs" literally true. No Stripe and
@@ -656,7 +663,7 @@ def dashboard(user: dict = Depends(current_user)) -> dict:
     """Everything the account view needs: connection state, money totals, invoices."""
     with get_conn() as conn:
         conn_row = conn.execute(
-            "SELECT stripe_account_id, status, last_synced_at FROM connections WHERE user_id = %s",
+            "SELECT stripe_account_id, status, last_synced_at, error_reason FROM connections WHERE user_id = %s",
             (user["id"],),
         ).fetchone()
         sub_row = conn.execute(
@@ -689,6 +696,8 @@ def dashboard(user: dict = Depends(current_user)) -> dict:
     )
     return {
         "connected": bool(conn_row) and conn_row["status"] == "active",
+        "connection_status": conn_row["status"] if conn_row else None,  # active | error | revoked | None
+        "connection_error": conn_row["error_reason"] if conn_row else None,
         "stripe_account_id": conn_row["stripe_account_id"] if conn_row else None,
         "last_synced_at": conn_row["last_synced_at"] if conn_row else None,
         "subscription_status": status,
@@ -897,8 +906,10 @@ async def stripe_webhook(request: Request) -> dict:
         except Exception:
             raise HTTPException(status_code=400, detail="Malformed payload")
 
-    etype = event["type"]
-    obj = event["data"]["object"]
+    etype = event.get("type")
+    obj = (event.get("data") or {}).get("object") or {}
+    if not etype:
+        return {"received": True}  # malformed / unrecognized envelope — ack so Stripe doesn't retry
 
     email: Optional[str] = None
     amount: Optional[int] = None
