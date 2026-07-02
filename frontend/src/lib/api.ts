@@ -9,6 +9,7 @@ export type User = {
   email_verified: boolean;
   display_name?: string | null;
   avatar_url?: string | null;
+  is_admin?: boolean;
 };
 
 export function getToken(): string | null {
@@ -312,4 +313,26 @@ export async function getReminderPreview(): Promise<ReminderPreview> {
   const res = await fetch("/api/reminders/preview", { headers: { ...authHeaders() } });
   if (!res.ok) throw new Error("Could not load the reminder preview");
   return (await res.json()) as ReminderPreview;
+}
+
+// ----- Admin analytics (owner-only) -----
+export type AdminMetrics = {
+  users: { total: number; verified: number; new_7d: number };
+  leads: { total: number };
+  connections: { connected: number; errored: number };
+  subscriptions: { trialing: number; active: number; past_due: number; canceled: number; none: number };
+  conversion: { trial_to_paid_pct: number | null };
+  collections: {
+    reminders_sent: number;
+    recovered_cents: number;
+    outstanding_cents: number;
+    open_invoices: number;
+    currency: string;
+  };
+};
+
+export async function getAdminMetrics(): Promise<AdminMetrics> {
+  const res = await fetch("/api/admin/metrics", { headers: { ...authHeaders() } });
+  if (!res.ok) throw new Error(await detail(res, "Could not load metrics"));
+  return (await res.json()) as AdminMetrics;
 }

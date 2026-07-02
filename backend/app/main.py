@@ -80,6 +80,10 @@ ACTIVE_PLAN_STATUSES = {"active", "trialing"}
 # Vercel Cron auth: the scheduled GET /api/cron/daily must carry "Authorization: Bearer $CRON_SECRET".
 CRON_SECRET = os.getenv("CRON_SECRET")
 
+# The single owner account allowed to see product analytics (/api/admin/*). Defaults to the
+# founder's personal email; override with ADMIN_EMAIL in the environment.
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "trmsantos22102002@gmail.com").strip().lower()
+
 app = FastAPI(title="Forja API", version="0.3.0")
 
 app.add_middleware(
@@ -184,7 +188,15 @@ def _user_dict(row: dict) -> dict:
         "email_verified": bool(row["email_verified"]),
         "display_name": row.get("display_name"),
         "avatar_url": row.get("avatar_url"),
+        "is_admin": (row["email"] or "").strip().lower() == ADMIN_EMAIL,
     }
+
+
+def _require_admin(user: dict) -> None:
+    """Gate the analytics endpoints to the single owner account (defense in depth alongside the
+    UI hiding the link)."""
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admins only.")
 
 
 def _send_verification(user_id: int, name: str, email: str) -> None:
@@ -277,6 +289,7 @@ def register(body: RegisterIn) -> dict:
             "email_verified": False,
             "display_name": None,
             "avatar_url": None,
+            "is_admin": body.email.strip().lower() == ADMIN_EMAIL,
         },
     }
 
@@ -794,6 +807,63 @@ def collections_run(user: dict = Depends(current_user)) -> dict:
     from .collections_agent import run_sweep
 
     return run_sweep(user_id=user["id"])
+
+
+@app.get("/api/admin/metrics")
+def admin_metrics(user: dict = Depends(current_user)) -> dict:
+    """Owner-only product analytics: the funnel from lead -> signup -> connected -> trial -> paid,
+    plus collections output. Gated to ADMIN_EMAIL."""
+    _require_admin(user)
+    week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+
+    with get_conn() as conn:
+        users_total = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
+        verified = conn.execute("SELECT COUNT(*) AS c FROM users WHERE email_verified = 1").fetchone()["c"]
+        new_7d = conn.execute("SELECT COUNT(*) AS c FROM users WHERE created_at >= %s", (week_ago,)).fetchone()["c"]
+        leads_total = conn.execute("SELECT COUNT(*) AS c FROM leads").fetchone()["c"]
+        connected = conn.execute("SELECT COUNT(*) AS c FROM connections WHERE status = 'active'").fetchone()["c"]
+        errored = conn.execute("SELECT COUNT(*) AS c FROM connections WHERE status = 'error'").fetchone()["c"]
+        sub_rows = conn.execute(
+            "SELECT subscription_status AS s, COUNT(*) AS c FROM users GROUP BY subscription_status"
+        ).fetchall()
+        reminders = conn.execute("SELECT COUNT(*) AS c FROM reminders_sent").fetchone()["c"]
+        recovered = conn.execute(
+            "SELECT COALESCE(SUM(amount_due), 0) AS s FROM tracked_invoices WHERE status = 'paid'"
+        ).fetchone()["s"]
+        outstanding = conn.execute(
+            "SELECT COALESCE(SUM(amount_due), 0) AS s, COUNT(*) AS c FROM tracked_invoices WHERE status = 'open'"
+        ).fetchone()
+        cur_row = conn.execute(
+            "SELECT currency FROM tracked_invoices WHERE currency IS NOT NULL "
+            "GROUP BY currency ORDER BY COUNT(*) DESC LIMIT 1"
+        ).fetchone()
+
+    subs = {r["s"]: r["c"] for r in sub_rows}
+    active = subs.get("active", 0)
+    # Everyone who ever started a plan (trial or paid), so conversion excludes never-started users.
+    ever_started = active + subs.get("trialing", 0) + subs.get("past_due", 0) + subs.get("canceled", 0)
+    conversion = round(100 * active / ever_started, 1) if ever_started else None
+
+    return {
+        "users": {"total": users_total, "verified": verified, "new_7d": new_7d},
+        "leads": {"total": leads_total},
+        "connections": {"connected": connected, "errored": errored},
+        "subscriptions": {
+            "trialing": subs.get("trialing", 0),
+            "active": active,
+            "past_due": subs.get("past_due", 0),
+            "canceled": subs.get("canceled", 0),
+            "none": subs.get("none", 0),
+        },
+        "conversion": {"trial_to_paid_pct": conversion},
+        "collections": {
+            "reminders_sent": reminders,
+            "recovered_cents": recovered,
+            "outstanding_cents": outstanding["s"],
+            "open_invoices": outstanding["c"],
+            "currency": cur_row["currency"] if cur_row else "eur",
+        },
+    }
 
 
 @app.get("/api/cron/daily")

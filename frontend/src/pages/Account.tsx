@@ -207,6 +207,11 @@ export function Account() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {user.is_admin && (
+              <Link to="/admin" className="btn-ghost !px-5 !py-2.5 text-[14px]">
+                Admin
+              </Link>
+            )}
             <Link to="/account/settings" className="btn-ghost !px-5 !py-2.5 text-[14px]">
               Settings
             </Link>
