@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { Avatar } from "../components/Avatar";
-import { getDashboard, connectStripe, billingPortal, runCollections, resendVerification, startSubscription, type Dashboard, type PlanId } from "../lib/api";
+import { getDashboard, connectStripe, billingPortal, runCollections, resendVerification, startSubscription, pauseInvoice, type Dashboard, type PlanId, type TrackedInvoice } from "../lib/api";
 import { money } from "../lib/format";
 import { getAuditTeaser, clearAuditTeaser } from "../lib/auditTeaser";
 
@@ -50,6 +50,7 @@ export function Account() {
   const [toast, setToast] = useState<string | null>(null);
   // "You have €X overdue" carried over from the free audit, shown until Stripe is connected.
   const [teaser] = useState(getAuditTeaser);
+  const [pausingId, setPausingId] = useState<string | null>(null);
 
   function load() {
     getDashboard()
@@ -129,6 +130,18 @@ export function Account() {
       showToast(err instanceof Error ? err.message : "Could not start your subscription.");
     } finally {
       setSubscribing(null);
+    }
+  }
+
+  async function togglePause(inv: TrackedInvoice) {
+    setPausingId(inv.stripe_invoice_id);
+    try {
+      await pauseInvoice(inv.stripe_invoice_id, !inv.chase_paused);
+      load();
+    } catch {
+      showToast("Could not update the invoice. Try again.");
+    } finally {
+      setPausingId(null);
     }
   }
 
@@ -406,13 +419,21 @@ export function Account() {
               ) : (
                 <ul className="mt-4 divide-y divide-line">
                   {data.invoices.map((inv) => (
-                    <li key={inv.stripe_invoice_id} className="flex flex-wrap items-center justify-between gap-3 py-4">
+                    <li
+                      key={inv.stripe_invoice_id}
+                      className={`flex flex-wrap items-center justify-between gap-3 py-4 ${inv.chase_paused ? "opacity-55" : ""}`}
+                    >
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2.5">
+                        <div className="flex flex-wrap items-center gap-2.5">
                           <span className="text-[15px] font-semibold text-ink">
                             {inv.customer_name || inv.customer_email || "Unknown customer"}
                           </span>
                           <StatusBadge status={inv.status} />
+                          {inv.chase_paused === 1 && (
+                            <span className="inline-flex rounded-full bg-steel px-2.5 py-0.5 text-[12px] font-semibold text-slate">
+                              Not chasing
+                            </span>
+                          )}
                         </div>
                         <p className="mt-1 text-[13px] text-slate">
                           {inv.due_date ? `Due ${new Date(inv.due_date).toLocaleDateString()}` : "No due date"}
@@ -421,6 +442,15 @@ export function Account() {
                       </div>
                       <div className="flex items-center gap-4">
                         <span className="font-mono text-[15px] font-semibold tabular-nums text-ink">{money(inv.amount_due, inv.currency)}</span>
+                        {inv.status === "open" && (
+                          <button
+                            onClick={() => togglePause(inv)}
+                            disabled={pausingId === inv.stripe_invoice_id}
+                            className="text-[14px] font-medium text-slate transition-colors hover:text-ink disabled:opacity-50"
+                          >
+                            {pausingId === inv.stripe_invoice_id ? "…" : inv.chase_paused ? "Resume" : "Don’t chase"}
+                          </button>
+                        )}
                         {inv.hosted_invoice_url && (
                           <a href={inv.hosted_invoice_url} target="_blank" rel="noreferrer" className="text-[14px] font-medium text-ember hover:underline">
                             View

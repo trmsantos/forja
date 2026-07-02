@@ -53,6 +53,7 @@ jobs:
           python test_reminders.py
           python test_hardening.py
           python test_admin.py
+          python test_invoice_control.py
 
   frontend:
     name: Frontend typecheck + build
