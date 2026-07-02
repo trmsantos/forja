@@ -7,6 +7,7 @@ import { Login } from "./pages/Login";
 import { Signup } from "./pages/Signup";
 import { Account } from "./pages/Account";
 import { Settings } from "./pages/Settings";
+import { Reminders } from "./pages/Reminders";
 import { Audit } from "./pages/Audit";
 import { Verify } from "./pages/Verify";
 import { Terms } from "./pages/Terms";
@@ -23,6 +24,7 @@ export default function App() {
           <Route path="/signup" element={<Signup />} />
           <Route path="/account" element={<Account />} />
           <Route path="/account/settings" element={<Settings />} />
+          <Route path="/account/reminders" element={<Reminders />} />
           <Route path="/audit" element={<Audit />} />
           <Route path="/verify" element={<Verify />} />
           <Route path="/terms" element={<Terms />} />

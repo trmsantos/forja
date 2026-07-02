@@ -164,25 +164,40 @@ def reminder_subject(step: int, studio: str, days_overdue: int) -> str:
 
 
 def reminder_html(
-    step: int, studio: str, debtor_name: str, amount_display: str, days_overdue: int, pay_url: "str | None" = None
+    step: int,
+    studio: str,
+    debtor_name: str,
+    amount_display: str,
+    days_overdue: int,
+    pay_url: "str | None" = None,
+    tone: str = "friendly",
 ) -> str:
-    """Escalating, polite-to-firm reminder sent to the debtor on behalf of the vendor."""
+    """Escalating reminder sent to the debtor on behalf of the vendor.
+
+    step escalates the pressure (1 gentle → 2 firmer → 3 final); tone sets the baseline voice the
+    vendor chose: 'friendly' (warmer) or 'firm' (direct)."""
     # Escape names/URL from Stripe and registration before they enter the HTML.
     studio = html.escape(studio)
     debtor_name = html.escape(debtor_name)
     safe_url = html.escape(pay_url, quote=True) if pay_url else None
-    if step <= 1:
-        lead = (f"This is a friendly reminder that your invoice from {studio} "
-                f"(<strong>{amount_display}</strong>) is now {days_overdue} days past due.")
-        close = "If you've already paid, please ignore this note, and thank you."
-    elif step == 2:
-        lead = (f"A second reminder that your invoice from {studio} "
-                f"(<strong>{amount_display}</strong>) is now {days_overdue} days overdue.")
-        close = "Please arrange payment at your earliest convenience."
-    else:
-        lead = (f"This is a final reminder that your invoice from {studio} "
-                f"(<strong>{amount_display}</strong>) remains unpaid and is {days_overdue} days overdue.")
-        close = "Please settle this invoice promptly to avoid further follow-up."
+    s = 1 if step <= 1 else (2 if step == 2 else 3)
+    tone = "firm" if tone == "firm" else "friendly"
+    ref = f"your invoice from {studio} (<strong>{amount_display}</strong>)"
+    copy = {
+        ("friendly", 1): (f"Just a friendly reminder that {ref} is now {days_overdue} days past due.",
+                          "If you've already sent payment, thank you — please ignore this note."),
+        ("firm", 1): (f"This is a reminder that {ref} is now {days_overdue} days past due.",
+                      "Please arrange payment at your earliest convenience."),
+        ("friendly", 2): (f"A second reminder that {ref} is now {days_overdue} days overdue.",
+                          "We'd really appreciate it if you could arrange payment soon."),
+        ("firm", 2): (f"A second reminder: {ref} is now {days_overdue} days overdue.",
+                      "Please settle this invoice promptly."),
+        ("friendly", 3): (f"This is a final reminder that {ref} remains unpaid, now {days_overdue} days overdue.",
+                          "Please arrange payment to avoid further follow-up. Thank you."),
+        ("firm", 3): (f"Final reminder: {ref} remains unpaid and is {days_overdue} days overdue.",
+                      "Please settle this invoice immediately to avoid further action."),
+    }
+    lead, close = copy[(tone, s)]
 
     button = (
         f'<p style="margin:28px 0;"><a href="{safe_url}" '

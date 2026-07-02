@@ -283,3 +283,31 @@ export async function runCollections(): Promise<SweepResult> {
   if (!res.ok) throw new Error(await detail(res, "Could not run the chase"));
   return (await res.json()) as SweepResult;
 }
+
+// ----- Reminder settings + preview -----
+export type ReminderTone = "friendly" | "firm";
+export type ReminderSettings = { business_name: string; tone: ReminderTone; gap_days: number };
+export type ReminderPreviewStep = { step: number; subject: string; html: string };
+export type ReminderPreview = ReminderSettings & { steps: ReminderPreviewStep[] };
+
+export async function getReminderSettings(): Promise<ReminderSettings> {
+  const res = await fetch("/api/reminders/settings", { headers: { ...authHeaders() } });
+  if (!res.ok) throw new Error("Could not load your reminder settings");
+  return (await res.json()) as ReminderSettings;
+}
+
+export async function updateReminderSettings(s: ReminderSettings): Promise<ReminderSettings> {
+  const res = await fetch("/api/reminders/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ business_name: s.business_name || null, tone: s.tone, gap_days: s.gap_days }),
+  });
+  if (!res.ok) throw new Error(await detail(res, "Could not save your reminder settings"));
+  return (await res.json()) as ReminderSettings;
+}
+
+export async function getReminderPreview(): Promise<ReminderPreview> {
+  const res = await fetch("/api/reminders/preview", { headers: { ...authHeaders() } });
+  if (!res.ok) throw new Error("Could not load the reminder preview");
+  return (await res.json()) as ReminderPreview;
+}

@@ -31,12 +31,14 @@ def _parse(dt_iso: Optional[str]) -> Optional[datetime]:
     return datetime.fromisoformat(dt_iso) if dt_iso else None
 
 
-def next_reminder_step(invoice: dict, now: datetime) -> Optional[int]:
+def next_reminder_step(
+    invoice: dict, now: datetime, gap_days: int = MIN_GAP_DAYS, max_steps: int = MAX_STEPS
+) -> Optional[int]:
     """Pure decision: which reminder step to send for this invoice right now, or None to skip.
 
-    Rules: only OPEN invoices with a due date that is at least 1 day past; at most MAX_STEPS
-    reminders; and at least MIN_GAP_DAYS between reminders. Kept side-effect-free so it can be
-    unit-tested without a database or Stripe."""
+    Rules: only OPEN invoices with a due date that is at least 1 day past; at most max_steps
+    reminders; and at least gap_days between reminders (both configurable per user). Kept
+    side-effect-free so it can be unit-tested without a database or Stripe."""
     if invoice.get("status") != "open":
         return None
     due = _parse(invoice.get("due_date"))
@@ -45,10 +47,10 @@ def next_reminder_step(invoice: dict, now: datetime) -> Optional[int]:
     if (now - due).days < 1:
         return None  # not overdue yet
     step = invoice.get("reminder_step") or 0
-    if step >= MAX_STEPS:
+    if step >= max_steps:
         return None  # exhausted — left for the owner to escalate
     last = _parse(invoice.get("last_reminder_at"))
-    if last is not None and (now - last).days < MIN_GAP_DAYS:
+    if last is not None and (now - last).days < gap_days:
         return None  # too soon since the last reminder
     return step + 1
 
@@ -68,7 +70,9 @@ def send_reminder(conn, user_row, inv_row, step: int, now: datetime, dry_run: bo
     due = _parse(inv_row["due_date"])
     days_overdue = (now - due).days if due else 0
     amount = _amount_display(inv_row["amount_due"], inv_row["currency"])
-    studio = user_row["name"]
+    # The debtor sees the vendor's chosen business name (falls back to preferred/legal name).
+    studio = user_row.get("business_name") or user_row.get("display_name") or user_row["name"]
+    tone = user_row.get("reminder_tone") or "friendly"
     subject = reminder_subject(step, studio, days_overdue)
 
     if dry_run:
@@ -78,7 +82,7 @@ def send_reminder(conn, user_row, inv_row, step: int, now: datetime, dry_run: bo
     else:
         html = reminder_html(
             step, studio, inv_row["customer_name"] or "there", amount, days_overdue,
-            inv_row["hosted_invoice_url"],
+            inv_row["hosted_invoice_url"], tone=tone,
         )
         # Reply-To the actual vendor so debtor replies reach them, not Forja.
         sent = send_email(debtor_email, subject, html, reply_to=user_row["email"])
@@ -139,14 +143,19 @@ def run_sweep(user_id: Optional[int] = None, dry_run: Optional[bool] = None) -> 
             continue  # skip sending on stale data
         # 2) decide + send for this user's still-open invoices
         with get_conn() as conn:
-            user_row = conn.execute("SELECT id, name, email FROM users WHERE id = %s", (uid,)).fetchone()
+            user_row = conn.execute(
+                "SELECT id, name, email, display_name, business_name, reminder_tone, reminder_gap_days "
+                "FROM users WHERE id = %s",
+                (uid,),
+            ).fetchone()
             if user_row is None:
                 continue
+            gap = user_row["reminder_gap_days"] or MIN_GAP_DAYS
             invoices = conn.execute(
                 "SELECT * FROM tracked_invoices WHERE user_id = %s AND status = 'open'", (uid,)
             ).fetchall()
             for inv in invoices:
-                step = next_reminder_step(dict(inv), now)
+                step = next_reminder_step(dict(inv), now, gap_days=gap)
                 if step is not None and send_reminder(conn, user_row, inv, step, now, dry_run):
                     summary["reminders"] += 1
                 else:
