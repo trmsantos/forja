@@ -609,6 +609,10 @@ def billing_subscribe(body: SubscribeIn, user: dict = Depends(current_user)) -> 
             customer_email=user["email"],
             client_reference_id=str(user["id"]),  # lets the webhook match the user even before a customer id exists
             subscription_data={"trial_period_days": TRIAL_DAYS},
+            # No card required to start the trial — matches the "no card to start" promise on the
+            # site and lowers signup friction. Stripe only asks for a card if payment is due now
+            # (it isn't, during a free trial); at trial end an uncollected sub simply lapses.
+            payment_method_collection="if_required",
             allow_promotion_codes=True,
             success_url=f"{FRONTEND_ORIGIN}/account?subscription=success",
             cancel_url=f"{FRONTEND_ORIGIN}/account?subscription=cancelled",

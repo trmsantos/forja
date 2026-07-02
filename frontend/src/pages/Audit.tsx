@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { runAudit, type AuditSummary } from "../lib/api";
 import { money } from "../lib/format";
+import { FormError } from "../components/FormError";
 
 function AuditStat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
@@ -45,8 +46,8 @@ export function Audit() {
           </h1>
           <p className="mt-5 text-[18px] leading-relaxed text-slate">
             Paste a read-only Stripe key and Forja reads your invoices on the spot: how much is outstanding,
-            how many are overdue, and the one that&rsquo;s been waiting longest. Stripe sends one fixed reminder;
-            Forja runs the whole chase and shows the cash you&rsquo;ve recovered.
+            how many are overdue, and the one that&rsquo;s been waiting longest. Stripe reminds with one fixed
+            template; Forja runs the whole chase in your voice and shows the cash you&rsquo;ve recovered.
           </p>
         </div>
 
@@ -81,7 +82,7 @@ export function Audit() {
               <button type="submit" disabled={busy} className="btn-ember disabled:opacity-60">
                 {busy ? "Auditing…" : "Run my free audit"}
               </button>
-              {error && <p className="font-mono text-[12px] uppercase tracking-[0.14em] text-ember">{error}</p>}
+              <FormError message={error} />
             </form>
 
             <div className="mt-6 rounded-xl border border-line bg-paper p-4">
