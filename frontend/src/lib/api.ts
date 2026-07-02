@@ -172,6 +172,7 @@ export type Dashboard = {
   last_synced_at: string | null;
   subscription_status: string;
   trial_ends_at: string | null;
+  trial_days_left: number | null;
   totals: {
     open_count: number;
     outstanding_amount: number; // cents
@@ -187,7 +188,14 @@ export async function getDashboard(): Promise<Dashboard> {
   return (await res.json()) as Dashboard;
 }
 
-export type ConnectResult = { ok: boolean; synced: number; reconciled: number; stripe_account_id: string | null };
+export type ConnectResult = {
+  ok: boolean;
+  synced: number;
+  reconciled: number;
+  stripe_account_id: string | null;
+  trial_started?: boolean;
+  trial_days_left?: number | null;
+};
 
 export async function connectStripe(apiKey: string): Promise<ConnectResult> {
   const res = await fetch("/api/connect/stripe", {

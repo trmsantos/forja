@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -186,14 +186,43 @@ def _send_verification(user_id: int, name: str, email: str) -> None:
     send_email(email, "Confirm your Forja account", verification_html(name, link))
 
 
+def _sub_state(
+    status: Optional[str], trial_ends_at: Optional[str], stripe_customer_id: Optional[str]
+) -> "tuple[str, Optional[int]]":
+    """Effective (status, trial_days_left) for gating + display.
+
+    The trial is self-managed: it auto-starts when Stripe is connected (no Stripe customer yet)
+    and expires by trial_ends_at. Once past, it reads as 'canceled' even though the stored row
+    still says 'trialing' until the daily cron rewrites it. Stripe-managed subscriptions carry a
+    stripe_customer_id and are governed by webhooks, so we trust their stored status."""
+    status = status or "none"
+    if status != "trialing":
+        return status, None
+    now = datetime.now(timezone.utc)
+    ends: Optional[datetime] = None
+    if trial_ends_at:
+        try:
+            ends = datetime.fromisoformat(trial_ends_at)
+        except ValueError:
+            ends = None
+    if not stripe_customer_id and (ends is None or ends <= now):
+        return "canceled", None  # self-managed trial lapsed
+    days_left = max(0, (ends - now).days) if ends and ends > now else None
+    return "trialing", days_left
+
+
 def _plan_is_active(user_id: int) -> bool:
-    """True if the user has a subscription that entitles them to the collections engine
-    (active or trialing). This is the paywall: chasing is gated on it."""
+    """True if the user may use the collections engine (paid, or in an unexpired trial).
+    This is the paywall: chasing is gated on it."""
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT subscription_status FROM users WHERE id = %s", (user_id,)
+            "SELECT subscription_status, trial_ends_at, stripe_customer_id FROM users WHERE id = %s",
+            (user_id,),
         ).fetchone()
-    return bool(row) and row["subscription_status"] in ACTIVE_PLAN_STATUSES
+    if not row:
+        return False
+    status, _ = _sub_state(row["subscription_status"], row["trial_ends_at"], row["stripe_customer_id"])
+    return status in ACTIVE_PLAN_STATUSES
 
 
 def current_user(creds: HTTPAuthorizationCredentials = Depends(bearer)) -> dict:
@@ -530,7 +559,27 @@ def connect_stripe(body: ConnectStripeIn, user: dict = Depends(current_user)) ->
         )
 
     result = sync_invoices(user["id"], key)
-    return {"ok": True, "stripe_account_id": account_id, **result}
+
+    # Activation: the moment Stripe is connected, start a free, self-managed trial so chasing is
+    # on immediately — this is what makes "connect once and it runs" literally true. No Stripe and
+    # no card are involved; converting to a paid plan happens later via /api/billing/subscribe.
+    # Only for users who've never subscribed (status 'none', no Stripe customer) — never override
+    # an existing paid/canceled state.
+    trial_end = (datetime.now(timezone.utc) + timedelta(days=TRIAL_DAYS)).isoformat()
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE users SET subscription_status = 'trialing', trial_ends_at = %s "
+            "WHERE id = %s AND subscription_status = 'none' AND stripe_customer_id IS NULL",
+            (trial_end, user["id"]),
+        )
+        trial_started = cur.rowcount > 0
+    return {
+        "ok": True,
+        "stripe_account_id": account_id,
+        "trial_started": trial_started,
+        "trial_days_left": TRIAL_DAYS if trial_started else None,
+        **result,
+    }
 
 
 @app.get("/api/dashboard")
@@ -542,7 +591,8 @@ def dashboard(user: dict = Depends(current_user)) -> dict:
             (user["id"],),
         ).fetchone()
         sub_row = conn.execute(
-            "SELECT subscription_status, trial_ends_at FROM users WHERE id = %s", (user["id"],)
+            "SELECT subscription_status, trial_ends_at, stripe_customer_id FROM users WHERE id = %s",
+            (user["id"],),
         ).fetchone()
         open_row = conn.execute(
             "SELECT COUNT(*) AS c, COALESCE(SUM(amount_due), 0) AS s "
@@ -563,12 +613,18 @@ def dashboard(user: dict = Depends(current_user)) -> dict:
             (user["id"],),
         ).fetchall()
 
+    status, trial_days_left = _sub_state(
+        sub_row["subscription_status"] if sub_row else "none",
+        sub_row["trial_ends_at"] if sub_row else None,
+        sub_row["stripe_customer_id"] if sub_row else None,
+    )
     return {
         "connected": bool(conn_row) and conn_row["status"] == "active",
         "stripe_account_id": conn_row["stripe_account_id"] if conn_row else None,
         "last_synced_at": conn_row["last_synced_at"] if conn_row else None,
-        "subscription_status": sub_row["subscription_status"] if sub_row else "none",
+        "subscription_status": status,
         "trial_ends_at": sub_row["trial_ends_at"] if sub_row else None,
+        "trial_days_left": trial_days_left,
         "totals": {
             "open_count": open_row["c"],
             "outstanding_amount": open_row["s"],
@@ -581,10 +637,12 @@ def dashboard(user: dict = Depends(current_user)) -> dict:
 
 @app.post("/api/billing/subscribe")
 def billing_subscribe(body: SubscribeIn, user: dict = Depends(current_user)) -> dict:
-    """Start (or restart) a subscription: a Stripe Checkout Session in subscription mode on
-    OUR account, with a free trial. The webhook links the resulting customer to this user and
-    flips subscription_status to trialing/active. Returns a friendly message (not an error)
-    when Stripe isn't configured yet, so the dev/demo flow never hard-fails."""
+    """Convert to a PAID subscription: a Stripe Checkout Session in subscription mode on OUR
+    account, with a card collected. The free trial is the self-managed one that starts on Stripe
+    connect (see /api/connect/stripe), so this is the paid conversion — no additional trial here.
+    The webhook links the resulting customer to this user and flips subscription_status to active.
+    Returns a friendly message (not an error) when Stripe isn't configured yet, so the dev/demo
+    flow never hard-fails."""
     if body.plan not in SUBSCRIPTION_PRICES:
         raise HTTPException(status_code=400, detail="Unknown plan. Choose solo, studio, or agency.")
     price_id = SUBSCRIPTION_PRICES.get(body.plan)
@@ -608,11 +666,6 @@ def billing_subscribe(body: SubscribeIn, user: dict = Depends(current_user)) -> 
             line_items=[{"price": price_id, "quantity": 1}],
             customer_email=user["email"],
             client_reference_id=str(user["id"]),  # lets the webhook match the user even before a customer id exists
-            subscription_data={"trial_period_days": TRIAL_DAYS},
-            # No card required to start the trial — matches the "no card to start" promise on the
-            # site and lowers signup friction. Stripe only asks for a card if payment is due now
-            # (it isn't, during a free trial); at trial end an uncollected sub simply lapses.
-            payment_method_collection="if_required",
             allow_promotion_codes=True,
             success_url=f"{FRONTEND_ORIGIN}/account?subscription=success",
             cancel_url=f"{FRONTEND_ORIGIN}/account?subscription=cancelled",
@@ -655,7 +708,7 @@ def collections_run(user: dict = Depends(current_user)) -> dict:
     if not _plan_is_active(user["id"]):
         raise HTTPException(
             status_code=402,
-            detail="Start your free trial to switch on automatic chasing.",
+            detail="Connect Stripe to start your free trial, or subscribe to keep automatic chasing on.",
         )
     from .collections_agent import run_sweep
 
@@ -673,6 +726,16 @@ def cron_daily(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     from .collections_agent import run_sweep, run_weekly_recap
+
+    # Expire self-managed trials whose window has passed, so the sweep (which chases any 'trialing'
+    # user) doesn't keep working for free. Stripe-managed subscriptions are left to their webhooks.
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET subscription_status = 'canceled' "
+            "WHERE subscription_status = 'trialing' AND stripe_customer_id IS NULL "
+            "AND trial_ends_at IS NOT NULL AND trial_ends_at < %s",
+            (datetime.now(timezone.utc).isoformat(),),
+        )
 
     result: dict = {"swept": run_sweep()}
     today = datetime.now(timezone.utc).strftime("%a").lower()  # mon, tue, ...

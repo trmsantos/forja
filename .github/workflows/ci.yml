@@ -49,6 +49,7 @@ jobs:
         run: |
           python test_collections_agent.py
           python test_profile.py
+          python test_billing.py
 
   frontend:
     name: Frontend typecheck + build
