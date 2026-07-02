@@ -88,9 +88,14 @@ export function Account() {
     setConnecting(true);
     setConnectErr(null);
     try {
-      await connectStripe(apiKey.trim());
+      const res = await connectStripe(apiKey.trim());
       setApiKey("");
       clearAuditTeaser(); // connected — the audit handoff has done its job
+      showToast(
+        res.trial_started
+          ? "Connected — your 14-day free trial started. Automatic chasing is on."
+          : "Stripe connection updated."
+      );
       load();
     } catch (err) {
       setConnectErr(err instanceof Error ? err.message : "Could not connect your Stripe account");
@@ -170,6 +175,22 @@ export function Account() {
       </button>
       {connectErr && <p className="text-[14px] text-emberlit">{connectErr}</p>}
     </form>
+  );
+
+  // Paid conversion — the free trial already runs from the moment Stripe was connected.
+  const planButtons = (
+    <div className="mt-4 flex flex-wrap gap-3">
+      {PLANS.map((p) => (
+        <button
+          key={p.id}
+          onClick={() => subscribe(p.id)}
+          disabled={subscribing !== null}
+          className={`${p.id === "studio" ? "btn-ember" : "btn-ghost"} !px-5 !py-2.5 text-[14px] disabled:opacity-60`}
+        >
+          {subscribing === p.id ? "Starting…" : `Subscribe · ${p.name} ${p.price}/mo`}
+        </button>
+      ))}
+    </div>
   );
 
   return (
@@ -317,34 +338,35 @@ export function Account() {
                 </span>
                 {data.last_synced_at && <> · Last synced {new Date(data.last_synced_at).toLocaleString()}</>}
               </div>
-              {data.subscription_status !== "none" && (
+              {(data.subscription_status === "active" || data.subscription_status === "past_due") && (
                 <button onClick={openPortal} disabled={portalLoading} className="btn-ghost !px-5 !py-2.5 text-[14px] disabled:opacity-60">
                   {portalLoading ? "Opening…" : "Manage billing"}
                 </button>
               )}
             </div>
 
-            {!planActive && (
+            {data.subscription_status === "trialing" ? (
               <div className="mt-5 rounded-2xl border border-ember/40 bg-blush p-6 shadow-soft">
-                <h3 className="font-display text-lg font-bold text-ink">Switch on automatic chasing</h3>
+                <h3 className="font-display text-lg font-bold text-ink">
+                  Free trial
+                  {typeof data.trial_days_left === "number" &&
+                    ` · ${data.trial_days_left} day${data.trial_days_left === 1 ? "" : "s"} left`}
+                </h3>
                 <p className="mt-2 max-w-prose text-[14px] leading-relaxed text-slate">
-                  Forja is connected and watching your invoices. Start a 14-day free trial to let it send
-                  the reminders for you — no card charged today, cancel anytime.
+                  Automatic chasing is on. Pick a plan whenever you're ready — your card is only charged when
+                  you subscribe, and you can cancel anytime.
                 </p>
-                <div className="mt-4 flex flex-wrap gap-3">
-                  {PLANS.map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => subscribe(p.id)}
-                      disabled={subscribing !== null}
-                      className={`${p.id === "studio" ? "btn-ember" : "btn-ghost"} !px-5 !py-2.5 text-[14px] disabled:opacity-60`}
-                    >
-                      {subscribing === p.id ? "Starting…" : `Start trial · ${p.name} ${p.price}/mo`}
-                    </button>
-                  ))}
-                </div>
+                {planButtons}
               </div>
-            )}
+            ) : !planActive ? (
+              <div className="mt-5 rounded-2xl border border-ember/40 bg-blush p-6 shadow-soft">
+                <h3 className="font-display text-lg font-bold text-ink">Keep Forja chasing</h3>
+                <p className="mt-2 max-w-prose text-[14px] leading-relaxed text-slate">
+                  Your free trial has ended. Subscribe to keep the reminders going — cancel anytime.
+                </p>
+                {planButtons}
+              </div>
+            ) : null}
 
             <div className="mt-5 card p-7 shadow-soft">
               <div className="flex flex-wrap items-center justify-between gap-3">
