@@ -99,10 +99,12 @@ def init_db() -> None:
                 encrypted_key TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'active',  -- active | revoked | error
                 last_synced_at TEXT,
+                error_reason TEXT,  -- why status='error' (e.g. Stripe rejected the key), shown to the user
                 created_at TEXT NOT NULL
             )
             """
         )
+        conn.execute("ALTER TABLE connections ADD COLUMN IF NOT EXISTS error_reason TEXT")
         # Overdue invoices pulled from the customer's Stripe — the work queue the cron engine
         # chases. Upserted on (user_id, stripe_invoice_id) so a re-sync is idempotent.
         conn.execute(

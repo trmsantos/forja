@@ -168,6 +168,8 @@ export type TrackedInvoice = {
 
 export type Dashboard = {
   connected: boolean;
+  connection_status: string | null; // active | error | revoked | null
+  connection_error: string | null;
   stripe_account_id: string | null;
   last_synced_at: string | null;
   subscription_status: string;

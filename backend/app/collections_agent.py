@@ -31,6 +31,22 @@ def _parse(dt_iso: Optional[str]) -> Optional[datetime]:
     return datetime.fromisoformat(dt_iso) if dt_iso else None
 
 
+def _is_auth_error(exc: Exception) -> bool:
+    """True if a Stripe call failed because the key is bad (revoked / wrong scope), vs a
+    transient network/rate error. Uses the HTTP status (401/403) so it's version-agnostic."""
+    return getattr(exc, "http_status", None) in (401, 403)
+
+
+def _set_connection_status(user_id: int, status: str, reason: Optional[str]) -> None:
+    """Flag a connection's health so the dashboard can prompt a reconnect. The daily sweep only
+    touches 'active' connections, so marking 'error' also stops it retrying a dead key."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE connections SET status = %s, error_reason = %s WHERE user_id = %s",
+            (status, reason, user_id),
+        )
+
+
 def next_reminder_step(
     invoice: dict, now: datetime, gap_days: int = MIN_GAP_DAYS, max_steps: int = MAX_STEPS
 ) -> Optional[int]:
@@ -133,13 +149,19 @@ def run_sweep(user_id: Optional[int] = None, dry_run: Optional[bool] = None) -> 
             key = decrypt_secret(encrypted_key)
         except Exception:
             summary["errors"] += 1
+            _set_connection_status(uid, "error", "Stored Stripe key could not be decrypted.")
             continue
         # 1) refresh from Stripe so paid invoices are no longer 'open' (don't chase the paid)
         try:
             summary["synced"] += sync_invoices(uid, key).get("synced", 0)
         except Exception as exc:
-            print("[collections] sync failed for user", uid, "-", exc)
             summary["errors"] += 1
+            if _is_auth_error(exc):
+                # The key is dead — mark the connection so we stop retrying and the user can reconnect.
+                _set_connection_status(uid, "error", "Stripe rejected the key (revoked or missing Invoices access).")
+                print(f"[collections] auth error for user {uid} — connection marked 'error'")
+            else:
+                print(f"[collections] transient sync error for user {uid}: {exc}")  # left 'active' to retry
             continue  # skip sending on stale data
         # 2) decide + send for this user's still-open invoices
         with get_conn() as conn:
