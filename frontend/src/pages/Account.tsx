@@ -4,6 +4,7 @@ import { useAuth } from "../lib/auth";
 import { Avatar } from "../components/Avatar";
 import { getDashboard, connectStripe, billingPortal, runCollections, resendVerification, startSubscription, type Dashboard, type PlanId } from "../lib/api";
 import { money } from "../lib/format";
+import { getAuditTeaser, clearAuditTeaser } from "../lib/auditTeaser";
 
 const PLANS: { id: PlanId; name: string; price: string }[] = [
   { id: "solo", name: "Solo", price: "€19" },
@@ -47,6 +48,8 @@ export function Account() {
   const [chasing, setChasing] = useState(false);
   const [subscribing, setSubscribing] = useState<PlanId | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  // "You have €X overdue" carried over from the free audit, shown until Stripe is connected.
+  const [teaser] = useState(getAuditTeaser);
 
   function load() {
     getDashboard()
@@ -87,6 +90,7 @@ export function Account() {
     try {
       await connectStripe(apiKey.trim());
       setApiKey("");
+      clearAuditTeaser(); // connected — the audit handoff has done its job
       load();
     } catch (err) {
       setConnectErr(err instanceof Error ? err.message : "Could not connect your Stripe account");
@@ -236,6 +240,16 @@ export function Account() {
         ) : !data.connected ? (
           <div className="mt-8 card p-7 shadow-soft sm:p-9">
             <h2 className="font-display text-2xl font-bold text-ink">Connect your Stripe account</h2>
+            {teaser && (
+              <div className="mt-4 rounded-2xl border border-ember/40 bg-blush p-4">
+                <p className="text-[14px] leading-relaxed text-ink">
+                  Your audit found{" "}
+                  <span className="font-semibold text-ember">{money(teaser.overdueAmount, teaser.currency)}</span> across{" "}
+                  {teaser.overdueCount} overdue invoice{teaser.overdueCount === 1 ? "" : "s"}. Connect Stripe below to
+                  start recovering it.
+                </p>
+              </div>
+            )}
             <p className="mt-3 max-w-prose text-[15px] leading-relaxed text-slate">
               Forja reads your open invoices with a <span className="font-medium text-ink">read-only restricted key</span>{" "}
               and starts chasing the ones past due. Your key is encrypted, and you can disconnect anytime.
