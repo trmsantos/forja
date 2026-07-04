@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { motion } from "framer-motion";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import { useTheme } from "../lib/theme";
 import { Avatar } from "../components/Avatar";
 import {
   changePassword,
@@ -34,8 +36,38 @@ function Note({ msg }: { msg: Msg }) {
   );
 }
 
+const ICON_PROPS = {
+  width: 15,
+  height: 15,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+  "aria-hidden": true,
+};
+
+function SunIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4" />
+    </svg>
+  );
+}
+
+function MoonIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+    </svg>
+  );
+}
+
 export function Settings() {
   const { user, loading, setUser, logout } = useAuth();
+  const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
 
   // Profile
@@ -275,6 +307,44 @@ export function Settings() {
             </div>
             <Note msg={profileMsg} />
           </form>
+        </div>
+
+        {/* Appearance — theme */}
+        <div className="mt-6 card p-7 shadow-soft sm:p-8">
+          <h2 className="font-display text-xl font-bold text-ink">Appearance</h2>
+          <p className="mt-2 max-w-prose text-[14px] leading-relaxed text-slate">
+            Choose how Forja looks. New visitors follow their system setting until you pick one here.
+          </p>
+          <div
+            className="relative mt-5 inline-flex w-full max-w-xs rounded-2xl border border-line bg-steel p-1"
+            role="group"
+            aria-label="Theme"
+          >
+            {(["light", "dark"] as const).map((t) => {
+              const active = theme === t;
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTheme(t)}
+                  aria-pressed={active}
+                  className={`relative z-10 flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2 text-[14px] font-semibold capitalize transition-colors ${
+                    active ? "text-coal" : "text-slate hover:text-ink"
+                  }`}
+                >
+                  {active && (
+                    <motion.span
+                      layoutId="theme-pill"
+                      className="absolute inset-0 -z-10 rounded-xl bg-ember"
+                      transition={{ type: "spring", duration: 0.4, bounce: 0.2 }}
+                    />
+                  )}
+                  {t === "light" ? <SunIcon /> : <MoonIcon />}
+                  {t}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Reminder emails */}
