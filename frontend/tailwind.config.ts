@@ -7,20 +7,24 @@ const config: Config = {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
+      // Values live as CSS custom properties (RGB channels; see src/index.css) so theme switching
+      // is a single data-theme flip. The rgb(var(...) / <alpha-value>) form lets Tailwind inject
+      // the alpha channel, so both solid classes (bg-ember) AND opacity modifiers (bg-ember/40,
+      // ring-ember/15, text-coal/80, …) keep working exactly as before — now resolved per theme.
       colors: {
-        coal: "#0b0c0e", // deepest: text on ember, the "anvil" band
-        mist: "#0e0f13", // page canvas
-        paper: "#16181d", // surface / cards
-        steel: "#1e212a", // elevated panels, inputs, second neutral layer
-        line: "#2a2d35", // hairline borders
-        ink: "#f3f1ee", // primary text (warm off-white)
-        slate: "#9aa0ac", // muted text
-        ember: "#f1531c", // primary accent (molten)
-        emberlit: "#ff6a33", // hover / glow
-        emberdeep: "#c63f12",
-        blush: "#241611", // ember-tinted dark surface (category color)
-        sky: "#111a2b", // cool-tinted dark surface
-        mint: "#0f201a", // green-tinted dark surface
+        coal: "rgb(var(--color-coal) / <alpha-value>)", // text on ember, the "anvil" band
+        mist: "rgb(var(--color-mist) / <alpha-value>)", // page canvas
+        paper: "rgb(var(--color-paper) / <alpha-value>)", // surface / cards
+        steel: "rgb(var(--color-steel) / <alpha-value>)", // elevated panels, inputs
+        line: "rgb(var(--color-line) / <alpha-value>)", // hairline borders
+        ink: "rgb(var(--color-ink) / <alpha-value>)", // primary text
+        slate: "rgb(var(--color-slate) / <alpha-value>)", // muted text
+        ember: "rgb(var(--color-ember) / <alpha-value>)", // primary accent (molten)
+        emberlit: "rgb(var(--color-emberlit) / <alpha-value>)", // hover / glow
+        emberdeep: "rgb(var(--color-emberdeep) / <alpha-value>)",
+        blush: "rgb(var(--color-blush) / <alpha-value>)", // ember-tinted surface (category color)
+        sky: "rgb(var(--color-sky) / <alpha-value>)", // cool-tinted surface
+        mint: "rgb(var(--color-mint) / <alpha-value>)", // green-tinted surface
       },
       fontFamily: {
         // Display kept (Bricolage is distinctive, not a reflex default). Body swapped off
@@ -41,9 +45,10 @@ const config: Config = {
         "3xl": "1.6rem",
       },
       boxShadow: {
-        // Drop shadows barely read on dark; keep them deep and lean on borders + ember glow.
-        soft: "0 16px 50px -24px rgba(0,0,0,0.7)",
-        lift: "0 30px 70px -28px rgba(0,0,0,0.8)",
+        // soft/lift resolve through variables so the light theme can use a softer, warm-tinted
+        // shadow (a heavy black shadow reads as too harsh on a light canvas). See src/index.css.
+        soft: "var(--shadow-soft)",
+        lift: "var(--shadow-lift)",
         ember: "0 10px 40px -12px rgba(241,83,28,0.45)",
       },
     },

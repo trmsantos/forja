@@ -3,10 +3,60 @@
 @tailwind utilities;
 
 @layer base {
+  /* Palette as CSS variables so a theme switch is a single data-theme flip — Tailwind resolves
+     every bg-mist / text-ink / bg-ember class through these (see tailwind.config.ts). :root is the
+     dark "forge" theme (the existing default); :root[data-theme="light"] overrides each value.
+
+     Values are stored as space-separated RGB channels (not hex) so Tailwind's alpha modifiers
+     (bg-ember/40, ring-ember/15, text-coal/80, …) keep working: the config wraps each as
+     rgb(var(--color-x) / <alpha-value>). Use rgb(var(--color-x)) when referencing a variable
+     directly in CSS. */
   :root {
     /* Emil Kowalski's easing blueprint — built-in curves are too weak. */
     --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
     --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+
+    --color-coal: 11 12 14; /* #0b0c0e — text on ember, the "anvil" band */
+    --color-mist: 14 15 19; /* #0e0f13 — page canvas */
+    --color-paper: 22 24 29; /* #16181d — surface / cards */
+    --color-steel: 30 33 42; /* #1e212a — elevated panels, inputs */
+    --color-line: 42 45 53; /* #2a2d35 — hairline borders */
+    --color-ink: 243 241 238; /* #f3f1ee — primary text (warm off-white) */
+    --color-slate: 154 160 172; /* #9aa0ac — muted text */
+    --color-ember: 241 83 28; /* #f1531c — primary accent (molten) */
+    --color-emberlit: 255 106 51; /* #ff6a33 — hover / glow */
+    --color-emberdeep: 198 63 18; /* #c63f12 */
+    --color-blush: 36 22 17; /* #241611 — ember-tinted surface (category color) */
+    --color-sky: 17 26 43; /* #111a2b — cool-tinted surface */
+    --color-mint: 15 32 26; /* #0f201a — green-tinted surface */
+
+    /* Deep drop shadows barely read on dark; kept dark, leaning on borders + ember glow. */
+    --shadow-soft: 0 16px 50px -24px rgba(0, 0, 0, 0.7);
+    --shadow-lift: 0 30px 70px -28px rgba(0, 0, 0, 0.8);
+  }
+
+  /* Light theme. Accent ramp is deepened vs. the dark theme so ember-as-text and white-on-ember
+     both clear WCAG AA on light surfaces (verified for the ember button, ember links on white/mist,
+     and ember text on the blush chip). `coal` — the on-ember ink — flips to a warm near-white so
+     text-coal / bg-coal keep reading correctly on the ember CTA panels. */
+  :root[data-theme="light"] {
+    --color-coal: 253 244 238; /* #fdf4ee */
+    --color-mist: 246 244 239; /* #f6f4ef */
+    --color-paper: 255 255 255; /* #ffffff */
+    --color-steel: 238 236 229; /* #eeece5 */
+    --color-line: 224 220 210; /* #e0dcd2 */
+    --color-ink: 27 26 23; /* #1b1a17 */
+    --color-slate: 104 102 96; /* #686660 */
+    --color-ember: 190 59 12; /* #be3b0c */
+    --color-emberlit: 168 52 12; /* #a8340c */
+    --color-emberdeep: 144 46 10; /* #902e0a */
+    --color-blush: 251 230 219; /* #fbe6db */
+    --color-sky: 234 241 251; /* #eaf1fb */
+    --color-mint: 226 244 236; /* #e2f4ec */
+
+    /* Black shadows read as too heavy on a light canvas — use a soft warm-tinted shadow. */
+    --shadow-soft: 0 16px 50px -24px rgba(20, 15, 10, 0.12);
+    --shadow-lift: 0 30px 70px -28px rgba(20, 15, 10, 0.14);
   }
   html {
     scroll-behavior: smooth;
@@ -15,12 +65,12 @@
     @apply bg-mist text-ink font-sans antialiased;
   }
   ::selection {
-    background: #f1531c;
-    color: #0b0c0e;
+    background: rgb(var(--color-ember));
+    color: rgb(var(--color-coal));
   }
   /* Visible keyboard focus everywhere — quality floor (frontend-design + a11y). */
   :focus-visible {
-    outline: 2px solid #f1531c;
+    outline: 2px solid rgb(var(--color-ember));
     outline-offset: 2px;
   }
 }
@@ -71,8 +121,26 @@
   }
 }
 
+/* Smooth color crossfade when the theme flips. The ThemeProvider adds `theme-transition` to <html>
+   only for the switch moment (then removes it), so this never interferes with hover/press
+   transitions or the initial load, and it's skipped entirely under reduced-motion. */
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition: background-color 300ms var(--ease-out), border-color 300ms var(--ease-out),
+    color 300ms var(--ease-out), fill 300ms var(--ease-out), stroke 300ms var(--ease-out),
+    box-shadow 300ms var(--ease-out) !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
+  }
+  html.theme-transition,
+  html.theme-transition *,
+  html.theme-transition *::before,
+  html.theme-transition *::after {
+    transition: none !important;
   }
 }

@@ -1,7 +1,9 @@
 // Forja maker's mark — a "forged F": the letter hot-worked with chamfered cut terminals and a
 // molten (ember) tip on the top arm, so it reads as struck metal rather than a flat geometric F.
 
-const EMBER = "#f1531c";
+// Molten tip tracks the theme's accent (resolves the same CSS variable Tailwind's `ember` uses;
+// the variable holds RGB channels, so wrap in rgb()).
+const EMBER = "rgb(var(--color-ember))";
 
 export function LogoMark({ size = 32 }: { size?: number }) {
   return (
