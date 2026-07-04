@@ -7,7 +7,9 @@ bill through Stripe. A simple dashboard shows what's outstanding, what's been ch
 cash you've recovered.
 
 - **Model:** a vertical micro-SaaS (accounts-receivable collections), €19 / €49 / €99 per month.
-- **Stack:** Vite + React + TypeScript + React Router (frontend) · Python FastAPI + SQLite (backend).
+- **Stack:** Vite + React + TypeScript + React Router (frontend) · Python FastAPI (backend) · Postgres
+  (Neon). Deployed on Vercel — static frontend plus a Python serverless API — with Vercel Cron
+  driving the daily reminder sweep.
 - **Design:** dark "forge" theme — Bricolage Grotesque display, Geist body, Geist Mono for figures.
 
 ## How it works (the core loop)
@@ -52,14 +54,19 @@ Run the backend tests with the venv active: `python test_collections_agent.py`.
 
 ## Environment variables (full list)
 
-All optional in dev — the app falls back to console email, no payments, and a dry-run agent.
-Set them for production via `fly secrets set` (never commit `.env`).
+Optional in dev except `DATABASE_URL` — otherwise the app falls back to console email, no payments,
+and a dry-run agent. Set production values in the Vercel project (Settings → Environment Variables);
+never commit `.env`.
 
 | Var | Purpose |
 |---|---|
+| `DATABASE_URL` | **Required.** Postgres connection string. In prod use Neon's **pooled** URL. |
+| `ENVIRONMENT` | `development` locally (lets the dev secret fallbacks work). In prod leave unset or set `production`: the app then **refuses to start** unless `JWT_SECRET` and `ENCRYPTION_KEY` are strong, non-default values. |
 | `FRONTEND_ORIGIN` | Allowed CORS origin + link base. Set to your Vercel URL in prod. |
-| `JWT_SECRET` | Signs login/verification tokens. Use a long random string. |
+| `JWT_SECRET` | Signs login/verification tokens. Use a long random string (**not** the dev default). |
 | `ENCRYPTION_KEY` | Encrypts customers' Stripe keys at rest. **Different** from `JWT_SECRET`; changing it makes stored keys undecryptable. |
+| `CRON_SECRET` | Shared secret for the daily cron. Vercel Cron sends it as `Authorization: Bearer $CRON_SECRET`; `/api/cron/daily` rejects anything else. |
+| `ADMIN_EMAIL` | The single account that can see owner analytics (`/api/admin/*`). |
 | `STUDIO_EMAIL` | Where lead notifications go. |
 | `EMAIL_FROM` | From address for all email. Use a **verified branded domain** (see below). |
 | `RESEND_API_KEY` | Email via Resend (HTTP). If set, used first. |
@@ -84,58 +91,56 @@ Reminders set `Reply-To` to the vendor so client replies reach them, not Forja.
 
 ## Deploy
 
-### Backend — Fly.io
+Everything ships to **Vercel** from this one repo — the Vite frontend as a static build and the
+FastAPI backend as a Python serverless function — backed by **Neon Postgres**, with **Vercel Cron**
+running the daily reminder sweep. This is all wired up in [`vercel.json`](vercel.json); there's no
+separate backend host and no in-process scheduler.
 
-The backend is a FastAPI app with SQLite on a persistent volume (swap to Postgres/Supabase when
-you outgrow a single file — see `app/db.py`).
+**1. Database — Neon Postgres.** Create a project at [neon.tech](https://neon.tech) and copy its
+**pooled** connection string (the serverless API opens many short-lived connections, so pooling
+matters). Create the tables once with `python backend/scripts/init_db.py` (or let the first request
+create them lazily — `init_db()` is idempotent and runs on cold start).
 
-```bash
-cd backend
-fly launch --no-deploy                 # creates fly.toml; pick a region
-fly volumes create forja_data --size 1 # SQLite lives here
-```
+**2. Deploy the repo to Vercel.** Import the GitHub repo (or `vercel --prod`). `vercel.json` already
+declares both builds and routes `/api/*` to the Python function:
 
-In `fly.toml`, mount the volume and point the DB at it, and run uvicorn:
-
-```toml
-[mounts]
-  source = "forja_data"
-  destination = "/data"
-
-[env]
-  PORT = "8080"
-
-[processes]
-  app = "uvicorn app.main:app --host 0.0.0.0 --port 8080"
-```
-
-Set `DB_PATH` handling: `app/db.py` keeps `forja.db` next to the app by default; for Fly, set the
-DB into the mounted volume (e.g. symlink or extend `DB_PATH` to `/data/forja.db`). Then:
-
-```bash
-fly secrets set JWT_SECRET=... ENCRYPTION_KEY=... STRIPE_SECRET_KEY=... STRIPE_WEBHOOK_SECRET=... \
-  RESEND_API_KEY=... EMAIL_FROM="Your Studio <billing@yourdomain>" FRONTEND_ORIGIN=https://your-app.vercel.app \
-  COLLECTIONS_ENABLED=1 COLLECTIONS_DRY_RUN=1
-fly deploy
-```
-
-Point your Stripe webhook at `https://<fly-app>.fly.dev/api/stripe/webhook`.
-
-### Frontend — Vercel
-
-It's a Vite SPA. Build command `npm run build`, output dir `dist`. Add a `vercel.json` so `/api`
-proxies to the Fly backend and client-side routes fall back to `index.html`:
-
-```json
+```jsonc
+// vercel.json (already in the repo)
 {
-  "rewrites": [
-    { "source": "/api/:path*", "destination": "https://<fly-app>.fly.dev/api/:path*" },
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
+  "builds": [
+    { "src": "frontend/package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } },
+    { "src": "api/index.py", "use": "@vercel/python", "config": { "includeFiles": "backend/**" } }
+  ],
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/api/index.py" },
+    { "handle": "filesystem" },
+    { "src": "/(.+\\.[a-zA-Z0-9]+)", "dest": "/frontend/$1" },
+    { "src": "/(.*)", "dest": "/frontend/index.html" }
+  ],
+  "crons": [{ "path": "/api/cron/daily", "schedule": "0 9 * * *" }]
 }
 ```
 
-Set the backend's `FRONTEND_ORIGIN` to the Vercel domain so CORS allows it.
+Because the frontend and API share one origin, no `/api` proxy or CORS hop is needed — set
+`FRONTEND_ORIGIN` to your Vercel URL anyway (it's the base for the links in emails).
+
+**3. Set environment variables** in the Vercel project (Settings → Environment Variables) — at
+minimum `DATABASE_URL`, a strong `JWT_SECRET` and `ENCRYPTION_KEY`, and `CRON_SECRET`; add
+`RESEND_API_KEY` / `EMAIL_FROM`, the `STRIPE_*` keys, and `COLLECTIONS_*` as you switch features on.
+Leave `ENVIRONMENT` unset in prod (or set `production`) so the weak-secret guard is active. See the
+table above for the full list.
+
+**4. Scheduling — Vercel Cron.** The `crons` entry above fires `GET /api/cron/daily` once a day
+(09:00 UTC). Vercel sends `Authorization: Bearer $CRON_SECRET`, which the endpoint verifies before
+running the sweep (and the weekly recap when the weekday matches `RECAP_DAY`). One endpoint keeps it
+within Hobby's once-per-day cron limits.
+
+**5. Stripe webhook.** Point it at `https://<your-app>.vercel.app/api/stripe/webhook` and set
+`STRIPE_WEBHOOK_SECRET` so signatures are verified.
+
+> Prefer a different host? The backend is a plain FastAPI app (`backend/app/main.py`), so it also runs
+> under any ASGI server (`uvicorn app.main:app`) against the same `DATABASE_URL`. You'd then front the
+> Vite SPA separately and proxy `/api` to it — but the Vercel path above is the supported setup.
 
 ## Dogfood it: connect Stripe → first sweep
 
@@ -154,19 +159,21 @@ Set the backend's `FRONTEND_ORIGIN` to the Vercel domain so CORS allows it.
 - **Auth:** email + password (bcrypt), signed JWTs, email confirmation. `POST /api/auth/*`.
 - **Billing:** Stripe subscription for the €49/mo plan; `POST /api/billing/portal` opens the
   Stripe Customer Portal; the webhook tracks `customer.subscription.*`.
-- **Collections Agent** (`app/collections_agent.py`): a daily `BackgroundScheduler` sweep —
-  per active connection it re-syncs from Stripe, then sends escalating reminders (step 1 gentle →
-  step 3 final) for overdue open invoices, logging each and advancing its step. Stops at
-  `COLLECTIONS_MAX_STEPS` and never sends two within `COLLECTIONS_MIN_GAP_DAYS`. Trigger a
-  one-off sweep for the logged-in user with `POST /api/collections/run` (the "Run chase now"
-  button). **Dry-run is the default** so it never emails real debtors until you opt in.
-- **Weekly recap** (retention): a second scheduled job emails each subscribed customer a summary
-  (outstanding · recovered this week · reminders sent · open invoices). Goes to the *customer*,
-  never to debtors; same `COLLECTIONS_ENABLED` gate and `COLLECTIONS_DRY_RUN` safety. Timing via
-  `RECAP_DAY` / `RECAP_HOUR` (default Monday 08:00 UTC).
+- **Collections Agent** (`app/collections_agent.py`): the daily sweep, driven by Vercel Cron hitting
+  `GET /api/cron/daily` (not an in-process scheduler) — per active connection it re-syncs from
+  Stripe, then sends escalating reminders (step 1 gentle → step 3 final) for overdue open invoices,
+  logging each and advancing its step. Stops at `COLLECTIONS_MAX_STEPS` and never sends two within
+  `COLLECTIONS_MIN_GAP_DAYS`. Trigger a one-off sweep for the logged-in user with
+  `POST /api/collections/run` (the "Run chase now" button). **Dry-run is the default** so it never
+  emails real debtors until you opt in.
+- **Weekly recap** (retention): runs inside the same daily cron — on the weekday matching `RECAP_DAY`
+  it emails each subscribed customer a summary (outstanding · recovered this week · reminders sent ·
+  open invoices). Goes to the *customer*, never to debtors; same `COLLECTIONS_ENABLED` gate and
+  `COLLECTIONS_DRY_RUN` safety.
 
 ## Before launch
 
-Strong `JWT_SECRET` + `ENCRYPTION_KEY` + `FRONTEND_ORIGIN`; verified email domain; Stripe Billing
-prices + webhook signing secret; consider httpOnly-cookie tokens and Postgres. Replace the
-illustrative outcomes/testimonials in `frontend/src/lib/content.ts` with real ones.
+Strong `JWT_SECRET` + `ENCRYPTION_KEY` (with `ENVIRONMENT` unset/`production`, the app refuses to
+boot without them) + `FRONTEND_ORIGIN`; verified email domain; Stripe Billing prices + webhook
+signing secret; consider httpOnly-cookie tokens. Replace the illustrative outcomes/testimonials in
+`frontend/src/lib/content.ts` with real ones.

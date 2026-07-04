@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { Avatar } from "../components/Avatar";
 import {
   changePassword,
+  deleteAccount,
   disconnectStripe,
   getDashboard,
   removeAvatar,
@@ -34,7 +35,8 @@ function Note({ msg }: { msg: Msg }) {
 }
 
 export function Settings() {
-  const { user, loading, setUser } = useAuth();
+  const { user, loading, setUser, logout } = useAuth();
+  const navigate = useNavigate();
 
   // Profile
   const [name, setName] = useState("");
@@ -58,6 +60,12 @@ export function Settings() {
   const [connected, setConnected] = useState<boolean | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
   const [stripeMsg, setStripeMsg] = useState<Msg>(null);
+
+  // Account deletion
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deletePw, setDeletePw] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteMsg, setDeleteMsg] = useState<Msg>(null);
 
   useEffect(() => {
     if (user) {
@@ -169,6 +177,20 @@ export function Settings() {
       setStripeMsg({ kind: "err", text: err instanceof Error ? err.message : "Could not disconnect Stripe" });
     } finally {
       setDisconnecting(false);
+    }
+  }
+
+  async function onDeleteAccount(e: React.FormEvent) {
+    e.preventDefault();
+    setDeleteMsg(null);
+    setDeleting(true);
+    try {
+      await deleteAccount(deletePw);
+      logout(); // clears the token + user, then send them home
+      navigate("/");
+    } catch (err) {
+      setDeleteMsg({ kind: "err", text: err instanceof Error ? err.message : "Could not delete your account" });
+      setDeleting(false);
     }
   }
 
@@ -336,6 +358,66 @@ export function Settings() {
             )}
           </div>
           <Note msg={stripeMsg} />
+        </div>
+
+        {/* Danger zone — delete account */}
+        <div className="mt-6 card border-ember/30 p-7 shadow-soft sm:p-8">
+          <h2 className="font-display text-xl font-bold text-ink">Delete account</h2>
+          <p className="mt-2 max-w-prose text-[14px] leading-relaxed text-slate">
+            Permanently delete your account and all associated data — your Stripe connection, synced
+            invoices, reminder history, and records. This cannot be undone.
+          </p>
+          {!confirmingDelete ? (
+            <div className="mt-5">
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteMsg(null);
+                  setConfirmingDelete(true);
+                }}
+                className="btn-ghost !border-ember/40 !px-5 !py-2.5 text-[14px] text-emberlit"
+              >
+                Delete my account
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={onDeleteAccount} className="mt-5 grid gap-4 sm:max-w-md">
+              <p className="text-[14px] text-ink">
+                Enter your password to confirm. This will erase everything and log you out.
+              </p>
+              <input
+                type="password"
+                value={deletePw}
+                onChange={(e) => setDeletePw(e.target.value)}
+                required
+                placeholder="Your password"
+                autoComplete="current-password"
+                className="field"
+              />
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={deleting}
+                  className="btn-ember !bg-ember !px-5 !py-2.5 text-[14px] disabled:opacity-60"
+                >
+                  {deleting ? "Deleting…" : "Permanently delete"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmingDelete(false);
+                    setDeletePw("");
+                    setDeleteMsg(null);
+                  }}
+                  disabled={deleting}
+                  className="text-[14px] font-medium text-slate transition-colors hover:text-ink disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+          <Note msg={deleteMsg} />
         </div>
       </div>
     </section>
