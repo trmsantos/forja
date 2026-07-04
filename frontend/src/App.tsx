@@ -5,6 +5,8 @@ import { CookieNotice } from "./components/CookieNotice";
 import { Home } from "./pages/Home";
 import { Login } from "./pages/Login";
 import { Signup } from "./pages/Signup";
+import { ForgotPassword } from "./pages/ForgotPassword";
+import { ResetPassword } from "./pages/ResetPassword";
 import { Account } from "./pages/Account";
 import { Settings } from "./pages/Settings";
 import { Reminders } from "./pages/Reminders";
@@ -23,6 +25,8 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/account" element={<Account />} />
           <Route path="/account/settings" element={<Settings />} />
           <Route path="/account/reminders" element={<Reminders />} />

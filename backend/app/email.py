@@ -126,6 +126,19 @@ def verification_html(name: str, link: str) -> str:
     )
 
 
+def password_reset_html(name: str, link: str) -> str:
+    return _shell(
+        f'<h1 style="font-size:24px;">Reset your password, {name}.</h1>'
+        f'<p>We received a request to reset the password on your Forja account. Click below to '
+        f'choose a new one. If you didn\'t ask for this, you can safely ignore this email.</p>'
+        f'<p style="margin:28px 0;"><a href="{link}" '
+        f'style="background:{_EMBER};color:#fff;text-decoration:none;padding:12px 22px;border-radius:4px;font-weight:600;">'
+        f'Reset password</a></p>'
+        f'<p style="font-size:13px;color:#79746c;">Or paste this link into your browser:<br>{link}</p>'
+        f'<p style="font-size:13px;color:#79746c;">This link expires in 1 hour.</p>'
+    )
+
+
 def lead_notification_html(name: str, email: str, company: str, service: str, message: str) -> str:
     return _shell(
         f'<h1 style="font-size:22px;">New project enquiry</h1>'

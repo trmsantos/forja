@@ -38,11 +38,13 @@ from pydantic import BaseModel, EmailStr, Field
 
 from .blob import blob_configured, delete_blob, put_blob
 from .db import get_conn, init_db
+from .ratelimit import RateLimiter
 from .stripe_sync import audit_summary, sync_invoices
 from .email import (
     STUDIO_EMAIL,
     lead_confirmation_html,
     lead_notification_html,
+    password_reset_html,
     receipt_html,
     send_email,
     verification_html,
@@ -54,6 +56,7 @@ from .security import (
     decode_token,
     encrypt_secret,
     hash_password,
+    require_strong_secrets,
     verify_password,
 )
 
@@ -84,6 +87,13 @@ CRON_SECRET = os.getenv("CRON_SECRET")
 # founder's personal email; override with ADMIN_EMAIL in the environment.
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "trmsantos22102002@gmail.com").strip().lower()
 
+# Abuse guard for the public, unauthenticated /api/audit lead magnet: it takes an arbitrary Stripe
+# key and calls Stripe with it, so without a cap it's a free oracle for testing leaked keys (and it
+# burns our Stripe quota). Cap each client IP to a handful of audits per hour.
+AUDIT_RATE_LIMIT = int(os.getenv("AUDIT_RATE_LIMIT", "5"))
+AUDIT_RATE_WINDOW_SECONDS = int(os.getenv("AUDIT_RATE_WINDOW_SECONDS", "3600"))
+_audit_limiter = RateLimiter(AUDIT_RATE_LIMIT, AUDIT_RATE_WINDOW_SECONDS)
+
 app = FastAPI(title="Forja API", version="0.3.0")
 
 app.add_middleware(
@@ -107,6 +117,11 @@ def _startup() -> None:
 
     There is no in-process scheduler on serverless — the daily sweep and weekly recap run via
     Vercel Cron hitting /api/cron/daily."""
+    # Fail fast on weak/default secrets BEFORE serving anything (and before the init_db guard),
+    # so a production deploy can never boot with forgeable tokens / decryptable Stripe keys.
+    # NOT wrapped in the try/except below: this must hard-crash, not be swallowed.
+    require_strong_secrets()
+
     global _db_initialized
     if _db_initialized:
         return
@@ -131,6 +146,15 @@ class LoginIn(BaseModel):
 
 class VerifyIn(BaseModel):
     token: str
+
+
+class ForgotPasswordIn(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordIn(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8, max_length=200)
 
 
 class Lead(BaseModel):
@@ -172,6 +196,11 @@ class PasswordIn(BaseModel):
     new_password: str = Field(min_length=8, max_length=200)
 
 
+class DeleteAccountIn(BaseModel):
+    # Re-confirm the current password before we irreversibly erase the account.
+    password: str = Field(min_length=1, max_length=200)
+
+
 class ReminderSettingsIn(BaseModel):
     # What debtors see and how often. business_name falls back to the account name when blank.
     business_name: Optional[str] = Field(default=None, max_length=80)
@@ -185,6 +214,15 @@ class PauseInvoiceIn(BaseModel):
 
 
 # ---------- helpers ----------
+def _client_ip(request: Request) -> str:
+    """The requesting client's IP. Behind Vercel's proxy the real client is the first hop of
+    X-Forwarded-For; fall back to the socket peer for local/direct requests."""
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
 def _user_dict(row: dict) -> dict:
     return {
         "id": row["id"],
@@ -342,6 +380,38 @@ def resend_verification(user: dict = Depends(current_user)) -> dict:
     return {"ok": True}
 
 
+@app.post("/api/auth/forgot-password")
+def forgot_password(body: ForgotPasswordIn) -> dict:
+    """Start a password reset: if an account exists for this email, email a short-lived reset link.
+    ALWAYS returns ok — never reveals whether the address has an account (no enumeration oracle)."""
+    email = body.email.lower()
+    with get_conn() as conn:
+        row = conn.execute("SELECT id, name FROM users WHERE email = %s", (email,)).fetchone()
+    if row:
+        token = create_email_token(row["id"], "reset", ttl_hours=1)
+        link = f"{FRONTEND_ORIGIN}/reset-password?token={token}"
+        send_email(email, "Reset your Forja password", password_reset_html(row["name"], link))
+    return {"ok": True}
+
+
+@app.post("/api/auth/reset-password")
+def reset_password(body: ResetPasswordIn) -> dict:
+    """Finish a password reset using the token from the emailed link. The token is single-purpose
+    ('reset') and short-lived; JWTs are stateless with a short TTL, so nothing else needs clearing."""
+    try:
+        user_id = decode_email_token(body.token, "reset")
+    except Exception:
+        raise HTTPException(status_code=400, detail="This reset link is invalid or has expired.")
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE users SET password_hash = %s WHERE id = %s",
+            (hash_password(body.new_password), user_id),
+        )
+    if cur.rowcount == 0:
+        raise HTTPException(status_code=400, detail="This reset link is invalid or has expired.")
+    return {"ok": True}
+
+
 # ---------- profile & account settings ----------
 # Accepted avatar types -> file extension. Kept small on purpose (raster photos only).
 ALLOWED_AVATAR_TYPES = {
@@ -381,6 +451,26 @@ def change_password(body: PasswordIn, user: dict = Depends(current_user)) -> dic
             "UPDATE users SET password_hash = %s WHERE id = %s",
             (hash_password(body.new_password), user["id"]),
         )
+    return {"ok": True}
+
+
+@app.delete("/api/account")
+def delete_account(body: DeleteAccountIn, user: dict = Depends(current_user)) -> dict:
+    """Permanently delete the account (GDPR erasure), after re-confirming the password.
+
+    Deleting the user row cascades connections, tracked_invoices and reminders_sent (ON DELETE
+    CASCADE). leads and payments are keyed by email (no FK back to users), so we delete those by
+    email explicitly."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT password_hash, email FROM users WHERE id = %s", (user["id"],)
+        ).fetchone()
+        if row is None or not verify_password(body.password, row["password_hash"]):
+            raise HTTPException(status_code=400, detail="Your password is incorrect.")
+        email = row["email"]
+        conn.execute("DELETE FROM leads WHERE email = %s", (email,))
+        conn.execute("DELETE FROM payments WHERE email = %s", (email,))
+        conn.execute("DELETE FROM users WHERE id = %s", (user["id"],))
     return {"ok": True}
 
 
@@ -562,10 +652,23 @@ def create_lead(lead: Lead) -> dict:
 
 
 @app.post("/api/audit")
-def audit(body: AuditIn) -> dict:
+def audit(body: AuditIn, request: Request) -> dict:
     """Public lead magnet (no signup): read a visitor's Stripe invoices and return a one-time
     overdue summary. STATELESS by design — the key and invoices are read in memory and never
-    persisted. Only an optional email is captured, as a lead (same table as /api/leads)."""
+    persisted. Only an optional email is captured, as a lead (same table as /api/leads).
+
+    IP rate-limited (see _audit_limiter): anonymous callers pass an arbitrary Stripe key that we
+    hand to Stripe, so an uncapped endpoint is a free leaked-key oracle. Checked first, before we
+    touch Stripe at all."""
+    if not _audit_limiter.allow(_client_ip(request)):
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "You've run the free audit a few times in the last hour. Please try again later, "
+                "or create an account to connect your Stripe and run it as often as you like."
+            ),
+        )
+
     import stripe
 
     key = body.api_key.strip()

@@ -143,8 +143,8 @@ export const packages: Pkg[] = [
     name: "Agency",
     price: "€99",
     cadence: "per month",
-    summary: "For teams billing across multiple Stripe accounts.",
-    features: ["Everything in Studio", "Multiple Stripe accounts", "Branded sender domain", "Priority support"],
+    summary: "For higher-volume studios that want a branded sender and priority support.",
+    features: ["Everything in Studio", "Branded sender domain", "Priority support"],
     action: "quote",
   },
 ];

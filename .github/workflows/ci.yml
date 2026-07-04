@@ -54,6 +54,10 @@ jobs:
           python test_hardening.py
           python test_admin.py
           python test_invoice_control.py
+          python test_security_secrets.py
+          python test_audit_ratelimit.py
+          python test_password_reset.py
+          python test_account_deletion.py
 
   frontend:
     name: Frontend typecheck + build

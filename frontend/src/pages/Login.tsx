@@ -44,6 +44,11 @@ export function Login() {
       <form onSubmit={onSubmit} className="grid gap-4">
         <input required type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} className="field" autoComplete="email" />
         <input required type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} className="field" autoComplete="current-password" />
+        <div className="-mt-1 text-right">
+          <Link to="/forgot-password" className="text-[14px] text-slate transition-colors hover:text-ember">
+            Forgot your password?
+          </Link>
+        </div>
         <button type="submit" disabled={busy} className="btn-ember disabled:opacity-60">
           {busy ? "Logging in…" : "Log in"}
         </button>

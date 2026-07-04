@@ -131,6 +131,27 @@ export async function resendVerification(): Promise<void> {
   if (!res.ok) throw new Error("Could not resend the confirmation email");
 }
 
+// Request a password-reset link. Always resolves (the backend returns ok whether or not the
+// address has an account, so the UI can't be used to probe which emails are registered).
+export async function forgotPassword(email: string): Promise<void> {
+  const res = await fetch("/api/auth/forgot-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) throw new Error(await detail(res, "Could not send the reset email"));
+}
+
+// Set a new password using the token from the emailed reset link.
+export async function resetPassword(token: string, newPassword: string): Promise<void> {
+  const res = await fetch("/api/auth/reset-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, new_password: newPassword }),
+  });
+  if (!res.ok) throw new Error(await detail(res, "This reset link is invalid or has expired"));
+}
+
 export type RequestRecord = { service?: string; message: string; at: string };
 
 export async function myRequests(): Promise<RequestRecord[]> {
@@ -251,6 +272,16 @@ export async function removeAvatar(): Promise<void> {
 export async function disconnectStripe(): Promise<void> {
   const res = await fetch("/api/connect/disconnect", { method: "POST", headers: { ...authHeaders() } });
   if (!res.ok) throw new Error(await detail(res, "Could not disconnect Stripe"));
+}
+
+// Permanently delete the account (GDPR). Requires the current password for confirmation.
+export async function deleteAccount(password: string): Promise<void> {
+  const res = await fetch("/api/account", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) throw new Error(await detail(res, "Could not delete your account"));
 }
 
 export async function billingPortal(): Promise<{ url: string }> {
